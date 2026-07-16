@@ -17,7 +17,10 @@ import { Label } from "@/components/ui/label";
 import { IDLE_ACTION_STATE } from "@/types/action";
 
 export function ResetPasswordForm() {
-  const [state, formAction] = useActionState(updatePasswordAction, IDLE_ACTION_STATE);
+  const [state, formAction] = useActionState(
+    updatePasswordAction,
+    IDLE_ACTION_STATE,
+  );
 
   return (
     <Card>
@@ -37,7 +40,11 @@ export function ResetPasswordForm() {
               required
             />
             <FieldError
-              messages={state.status === "error" ? state.fieldErrors?.password : undefined}
+              messages={
+                state.status === "error"
+                  ? state.fieldErrors?.password
+                  : undefined
+              }
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -51,7 +58,9 @@ export function ResetPasswordForm() {
             />
             <FieldError
               messages={
-                state.status === "error" ? state.fieldErrors?.confirmPassword : undefined
+                state.status === "error"
+                  ? state.fieldErrors?.confirmPassword
+                  : undefined
               }
             />
           </div>

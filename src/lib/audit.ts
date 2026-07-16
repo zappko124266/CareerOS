@@ -2,6 +2,7 @@ import "server-only";
 import { headers } from "next/headers";
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma/client";
 
 export type AuditAction =
   | "auth.sign_up"
@@ -18,7 +19,7 @@ export type AuditAction =
  */
 export async function logAuditEvent(
   action: AuditAction,
-  options: { userId?: string | null; metadata?: Record<string, unknown> } = {},
+  options: { userId?: string | null; metadata?: Prisma.InputJsonValue } = {},
 ) {
   const headerList = await headers();
 

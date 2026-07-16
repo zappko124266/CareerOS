@@ -22,6 +22,9 @@ export async function GET(request: Request) {
   }
 
   const errorUrl = new URL("/login", origin);
-  errorUrl.searchParams.set("error", "Could not verify your sign-in link. Please try again.");
+  errorUrl.searchParams.set(
+    "error",
+    "Could not verify your sign-in link. Please try again.",
+  );
   return NextResponse.redirect(errorUrl);
 }

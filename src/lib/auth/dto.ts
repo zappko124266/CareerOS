@@ -1,5 +1,5 @@
 import "server-only";
-import type { Profile } from "@/generated/prisma";
+import type { Profile } from "@/generated/prisma/client";
 
 /**
  * Shape of a user as returned to the rest of the app. Keeping this as an

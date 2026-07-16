@@ -48,9 +48,17 @@ export function ForgotPasswordForm() {
         <form action={formAction} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" autoComplete="email" required />
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+            />
             <FieldError
-              messages={state.status === "error" ? state.fieldErrors?.email : undefined}
+              messages={
+                state.status === "error" ? state.fieldErrors?.email : undefined
+              }
             />
           </div>
           {state.status === "error" && !state.fieldErrors && (
@@ -62,7 +70,10 @@ export function ForgotPasswordForm() {
         </form>
         <p className="text-muted-foreground mt-6 text-center text-sm">
           Remembered it?{" "}
-          <Link href="/login" className="text-foreground underline underline-offset-4">
+          <Link
+            href="/login"
+            className="text-foreground underline underline-offset-4"
+          >
             Sign in
           </Link>
         </p>

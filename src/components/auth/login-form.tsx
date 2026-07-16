@@ -35,9 +35,17 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           )}
           <div className="flex flex-col gap-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" autoComplete="email" required />
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+            />
             <FieldError
-              messages={state.status === "error" ? state.fieldErrors?.email : undefined}
+              messages={
+                state.status === "error" ? state.fieldErrors?.email : undefined
+              }
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -58,7 +66,11 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
               required
             />
             <FieldError
-              messages={state.status === "error" ? state.fieldErrors?.password : undefined}
+              messages={
+                state.status === "error"
+                  ? state.fieldErrors?.password
+                  : undefined
+              }
             />
           </div>
           {state.status === "error" && !state.fieldErrors && (
@@ -70,7 +82,10 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
         </form>
         <p className="text-muted-foreground mt-6 text-center text-sm">
           Don&apos;t have an account?{" "}
-          <Link href="/sign-up" className="text-foreground underline underline-offset-4">
+          <Link
+            href="/sign-up"
+            className="text-foreground underline underline-offset-4"
+          >
             Sign up
           </Link>
         </p>

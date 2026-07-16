@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
-import type { Role } from "@/generated/prisma";
+import type { Role } from "@/generated/prisma/client";
 import type { UserDTO } from "@/lib/auth/dto";
 import { toUserDTO } from "@/lib/auth/dto";
 

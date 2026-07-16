@@ -22,7 +22,9 @@ if (!parsed.success) {
     "❌ Invalid client environment variables:",
     z.treeifyError(parsed.error),
   );
-  throw new Error("Invalid client environment variables. See console output above.");
+  throw new Error(
+    "Invalid client environment variables. See console output above.",
+  );
 }
 
 export const clientEnv = parsed.data;

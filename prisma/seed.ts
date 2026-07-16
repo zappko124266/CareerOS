@@ -4,9 +4,12 @@
  * Kept intentionally empty of feature data. Add idempotent `upsert` calls
  * here as domain models are introduced.
  */
-import { PrismaClient } from "../src/generated/prisma";
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../src/generated/prisma/client";
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log("No seed data defined yet.");

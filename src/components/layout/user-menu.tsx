@@ -1,4 +1,4 @@
-import { LogOut, Settings, User as UserIcon } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 import { signOutAction } from "@/actions/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -36,24 +36,13 @@ export function UserMenu({ user }: { user: UserDTO }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="flex flex-col">
-          <span className="truncate font-medium">{user.fullName ?? "Account"}</span>
+          <span className="truncate font-medium">
+            {user.fullName ?? "Account"}
+          </span>
           <span className="text-muted-foreground truncate text-xs font-normal">
             {user.email}
           </span>
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <a href="/dashboard/profile">
-            <UserIcon />
-            Profile
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a href="/dashboard/settings">
-            <Settings />
-            Settings
-          </a>
-        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <form action={signOutAction}>
           <DropdownMenuItem asChild variant="destructive">

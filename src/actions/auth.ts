@@ -48,7 +48,9 @@ export async function signInAction(
   await logAuditEvent("auth.sign_in", { userId: data.user.id });
 
   const redirectTo = formData.get("redirectTo");
-  redirect(typeof redirectTo === "string" && redirectTo ? redirectTo : "/dashboard");
+  redirect(
+    typeof redirectTo === "string" && redirectTo ? redirectTo : "/dashboard",
+  );
 }
 
 export async function signUpAction(
@@ -122,9 +124,12 @@ export async function requestPasswordResetAction(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${clientEnv.NEXT_PUBLIC_APP_URL}/auth/callback?redirectTo=/reset-password`,
-  });
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    parsed.data.email,
+    {
+      redirectTo: `${clientEnv.NEXT_PUBLIC_APP_URL}/auth/callback?redirectTo=/reset-password`,
+    },
+  );
 
   if (error) {
     return { status: "error", message: error.message };
@@ -169,7 +174,9 @@ export async function updatePasswordAction(
     };
   }
 
-  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
+  const { error } = await supabase.auth.updateUser({
+    password: parsed.data.password,
+  });
 
   if (error) {
     return { status: "error", message: error.message };

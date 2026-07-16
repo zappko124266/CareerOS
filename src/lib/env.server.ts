@@ -10,7 +10,9 @@ import { z } from "zod";
  * confusing runtime error deep in a request handler.
  */
 const serverEnvSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
 
   // Pooled connection (Supavisor/PgBouncer) — used by the app at runtime.
   DATABASE_URL: z.url(),
@@ -27,7 +29,9 @@ if (!parsed.success) {
     "❌ Invalid server environment variables:",
     z.treeifyError(parsed.error),
   );
-  throw new Error("Invalid server environment variables. See console output above.");
+  throw new Error(
+    "Invalid server environment variables. See console output above.",
+  );
 }
 
 export const env = parsed.data;
