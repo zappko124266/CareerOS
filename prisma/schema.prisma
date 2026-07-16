@@ -36,6 +36,7 @@ model Profile {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   auditLogs AuditLog[]
+  resumes   Resume[]
 
   @@map("profiles")
 }
@@ -57,4 +58,56 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+enum ResumeStatus {
+  UPLOADED
+  PARSING
+  PARSED
+  FAILED
+}
+
+/// A resume file a user uploaded, plus the AI-extracted structured content
+/// once parsed. `parsedData` is validated at the application boundary
+/// against `ResumeDataSchema` (src/features/resume/schema.ts) rather than
+/// modeled as relational tables — resume sections are variable-shape and
+/// always read/written as a whole, so normalizing them buys nothing.
+model Resume {
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @map("user_id") @db.Uuid
+  user             Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  originalFilename String       @map("original_filename")
+  storagePath      String       @map("storage_path")
+  mimeType         String       @map("mime_type")
+  fileSizeBytes    Int          @map("file_size_bytes")
+  status           ResumeStatus @default(UPLOADED)
+  failureReason    String?      @map("failure_reason")
+  rawText          String?      @map("raw_text")
+  parsedData       Json?        @map("parsed_data")
+  aiModel          String?      @map("ai_model")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  analyses ResumeAnalysis[]
+
+  @@index([userId])
+  @@map("resumes")
+}
+
+/// One ATS-score + optimization-suggestions run for a Resume. A new row per
+/// re-analysis (rather than overwriting) keeps a history of how a resume's
+/// score changed as it was edited/re-uploaded.
+model ResumeAnalysis {
+  id           String   @id @default(uuid()) @db.Uuid
+  resumeId     String   @map("resume_id") @db.Uuid
+  resume       Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  overallScore Int      @map("overall_score")
+  breakdown    Json
+  suggestions  Json
+  aiModel      String   @map("ai_model")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([resumeId])
+  @@map("resume_analyses")
 }

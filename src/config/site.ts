@@ -5,4 +5,7 @@ export const siteConfig = {
   url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
 } as const;
 
-export const mainNav = [{ title: "Dashboard", href: "/dashboard" }] as const;
+export const mainNav = [
+  { title: "Dashboard", href: "/dashboard" },
+  { title: "Resumes", href: "/resume" },
+] as const;
