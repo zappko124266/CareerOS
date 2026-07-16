@@ -1,0 +1,60 @@
+// Prisma schema for CareerOS.
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Connection strings are no longer declared here (Prisma 7) — the CLI reads
+// `DIRECT_URL` from `prisma.config.ts`, and the app constructs its own
+// runtime connection via a driver adapter in `src/lib/prisma.ts`.
+datasource db {
+  provider = "postgresql"
+}
+
+/// Application-level role used for coarse-grained authorization checks.
+/// Keep this separate from any Supabase `auth.users` metadata: it is the
+/// single source of truth the app's DAL and Proxy read from.
+enum Role {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+/// Mirrors a subset of `auth.users` (managed by Supabase Auth) into the
+/// public schema so it can be joined against with Prisma. The `id` is the
+/// same UUID as `auth.users.id` — kept in sync by the trigger defined in
+/// `prisma/sql/001_handle_new_user.sql` (see docs/ARCHITECTURE.md#auth).
+model Profile {
+  id        String   @id @db.Uuid
+  email     String   @unique
+  fullName  String?  @map("full_name")
+  avatarUrl String?  @map("avatar_url")
+  role      Role     @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  auditLogs AuditLog[]
+
+  @@map("profiles")
+}
+
+/// Append-only trail of security-relevant events (auth, authorization,
+/// and data-mutation events) for compliance and incident investigation.
+/// Write through `lib/audit.ts` — never delete rows, only retain/rotate.
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  user      Profile? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  metadata  Json?
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
