@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { AuthRetryableFetchError } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { logAuditEvent } from "@/lib/audit";
@@ -16,6 +17,18 @@ import type { ActionResult } from "@/types/action";
 
 function fieldErrorsFromZod(error: z.ZodError): Record<string, string[]> {
   return z.flattenError(error).fieldErrors as Record<string, string[]>;
+}
+
+// Temporary diagnostic for the Supabase Auth connectivity investigation —
+// remove once diagnosed.
+function logIfAuthRetryableFetchError(error: unknown) {
+  if (!(error instanceof AuthRetryableFetchError)) return;
+
+  console.log("SIGNUP AUTH RETRYABLE FETCH ERROR NAME", error.name);
+  console.log("SIGNUP AUTH RETRYABLE FETCH ERROR MESSAGE", error.message);
+  console.log("SIGNUP AUTH RETRYABLE FETCH ERROR STATUS", error.status);
+  console.log("SIGNUP AUTH RETRYABLE FETCH ERROR CAUSE", error.cause);
+  console.dir(error, { depth: null });
 }
 
 export async function signInAction(
@@ -74,17 +87,33 @@ export async function signUpAction(
 
   const supabase = await createClient();
   const { fullName, email, password } = parsed.data;
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { full_name: fullName },
-      emailRedirectTo: `${clientEnv.NEXT_PUBLIC_APP_URL}/auth/callback`,
-    },
-  });
+
+  console.log("SIGNUP SUPABASE URL", clientEnv.NEXT_PUBLIC_SUPABASE_URL);
+  console.log(
+    "SIGNUP SUPABASE ANON KEY PRESENT",
+    Boolean(clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+  );
+
+  let data: Awaited<ReturnType<typeof supabase.auth.signUp>>["data"];
+  let error: Awaited<ReturnType<typeof supabase.auth.signUp>>["error"];
+
+  try {
+    ({ data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: fullName },
+        emailRedirectTo: `${clientEnv.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      },
+    }));
+  } catch (caughtError) {
+    logIfAuthRetryableFetchError(caughtError);
+    throw caughtError;
+  }
 
   console.log("SIGNUP DATA", data);
   console.log("SIGNUP ERROR", error);
+  logIfAuthRetryableFetchError(error);
 
   if (error) {
     return { status: "error", message: error.message };
