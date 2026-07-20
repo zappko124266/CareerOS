@@ -12,8 +12,14 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+        // Light-mode text is a darker shade than `text-destructive` on
+        // purpose — measured contrast against this badge's own
+        // `bg-destructive/10` background was 3.97:1 (fails WCAG AA's
+        // 4.5:1 for this text size); `oklch(0.45 0.245 27.325)` (same
+        // hue/chroma, lower lightness) measures 5.76:1. Dark mode's
+        // pairing wasn't flagged, so it's untouched.
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
+          "bg-destructive/10 text-[oklch(0.45_0.245_27.325)] focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:text-destructive dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
         outline:
           "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

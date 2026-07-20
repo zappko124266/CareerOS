@@ -18,6 +18,16 @@ const STATUS_VARIANT: Record<
   FAILED: "destructive",
 };
 
-export function ResumeStatusBadge({ status }: { status: ResumeStatus }) {
-  return <Badge variant={STATUS_VARIANT[status]}>{STATUS_LABEL[status]}</Badge>;
+export function ResumeStatusBadge({
+  status,
+  className,
+}: {
+  status: ResumeStatus;
+  className?: string;
+}) {
+  return (
+    <Badge variant={STATUS_VARIANT[status]} className={className}>
+      {STATUS_LABEL[status]}
+    </Badge>
+  );
 }

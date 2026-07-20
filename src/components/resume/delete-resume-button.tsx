@@ -20,7 +20,12 @@ export function DeleteResumeButton({ resumeId }: { resumeId: string }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Delete resume">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0"
+          aria-label="Delete resume"
+        >
           <Trash2 />
         </Button>
       </AlertDialogTrigger>

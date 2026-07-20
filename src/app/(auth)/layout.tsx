@@ -12,7 +12,9 @@ export default function AuthLayout({
       <Link href="/" className="text-lg font-semibold tracking-tight">
         {siteConfig.name}
       </Link>
-      <div className="w-full max-w-sm">{children}</div>
+      <main id="main-content" className="w-full max-w-sm">
+        {children}
+      </main>
     </div>
   );
 }

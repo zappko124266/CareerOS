@@ -60,7 +60,7 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -126,5 +126,21 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Global `prefers-reduced-motion` safety net: caps every animation/transition
+   to near-zero instead of requiring a `motion-reduce:` variant on every
+   individual utility class across the app. Users who've asked their OS for
+   reduced motion still see state changes (a dialog still opens), just
+   without the animated transition getting there. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

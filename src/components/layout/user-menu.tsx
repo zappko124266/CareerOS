@@ -1,8 +1,8 @@
-import { LogOut } from "lucide-react";
+import Link from "next/link";
+import { ChevronsUpDown, CreditCard, LogOut } from "lucide-react";
 
 import { signOutAction } from "@/actions/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SidebarMenuButton } from "@/components/ui/sidebar";
 import type { UserDTO } from "@/lib/auth/dto";
 
 function initials(user: UserDTO) {
@@ -27,14 +28,27 @@ export function UserMenu({ user }: { user: UserDTO }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="rounded-full">
+        <SidebarMenuButton size="lg" className="h-auto min-h-11 py-2">
           <Avatar className="size-8">
             <AvatarImage src={user.avatarUrl ?? undefined} alt="" />
             <AvatarFallback>{initials(user)}</AvatarFallback>
           </Avatar>
-        </Button>
+          <div className="flex min-w-0 flex-1 flex-col text-left">
+            <span className="truncate text-sm font-medium">
+              {user.fullName ?? "Account"}
+            </span>
+            <span className="text-muted-foreground truncate text-xs">
+              {user.email}
+            </span>
+          </div>
+          <ChevronsUpDown className="text-muted-foreground size-4 shrink-0" />
+        </SidebarMenuButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent
+        align="start"
+        side="top"
+        className="w-(--radix-dropdown-menu-trigger-width) min-w-56"
+      >
         <DropdownMenuLabel className="flex flex-col">
           <span className="truncate font-medium">
             {user.fullName ?? "Account"}
@@ -43,6 +57,13 @@ export function UserMenu({ user }: { user: UserDTO }) {
             {user.email}
           </span>
         </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/billing">
+            <CreditCard />
+            Billing &amp; usage
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <form action={signOutAction}>
           <DropdownMenuItem asChild variant="destructive">

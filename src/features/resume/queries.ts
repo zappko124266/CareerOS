@@ -22,6 +22,17 @@ export async function getResumeWithAnalyses(resumeId: string, userId: string) {
   return resume;
 }
 
+/** The user's most recently uploaded resume that finished parsing — the
+ * one source of truth every feature (dashboard AI cards, Opportunity
+ * match scoring) uses for "the current resume" rather than each querying
+ * for it independently. */
+export async function getLatestParsedResume(userId: string) {
+  return prisma.resume.findFirst({
+    where: { userId, status: "PARSED" },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 /** Throws `NotFoundError`/`ForbiddenError` instead of returning null/undefined,
  * so callers (Server Actions, pages) don't have to repeat the same check. */
 export function assertOwnership<T extends { userId: string } | null>(
@@ -44,4 +55,30 @@ export async function getOwnedResumeOrThrow(
   const resume = await prisma.resume.findUnique({ where: { id: resumeId } });
   assertOwnership(resume, userId);
   return resume;
+}
+
+export async function listResumeVersions(resumeId: string, userId: string) {
+  await getOwnedResumeOrThrow(resumeId, userId);
+  return prisma.resumeVersion.findMany({
+    where: { resumeId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function getOwnedResumeVersionOrThrow(
+  versionId: string,
+  resumeId: string,
+  userId: string,
+) {
+  await getOwnedResumeOrThrow(resumeId, userId);
+
+  const version = await prisma.resumeVersion.findUnique({
+    where: { id: versionId },
+  });
+
+  if (!version || version.resumeId !== resumeId) {
+    throw new NotFoundError("That resume version doesn't exist.");
+  }
+
+  return version;
 }

@@ -61,7 +61,10 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "bg-popover text-popover-foreground ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl p-4 text-sm ring-1 duration-100 outline-none sm:max-w-sm",
+          // max-h + overflow-y-auto is what guarantees the dialog never
+          // exceeds the viewport — long content scrolls inside it instead
+          // of pushing the footer/buttons off-screen.
+          "bg-popover text-popover-foreground ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100%-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl p-4 text-sm ring-1 duration-100 outline-none sm:max-w-sm",
           className,
         )}
         {...props}
@@ -72,7 +75,7 @@ function DialogContent({
             <Button
               variant="ghost"
               className="absolute top-2 right-2"
-              size="icon-sm"
+              size="icon"
             >
               <XIcon />
               <span className="sr-only">Close</span>
@@ -106,7 +109,10 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "bg-muted/50 -mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t p-4 sm:flex-row sm:justify-end",
+        // sticky bottom-0: when content is tall enough to scroll (see the
+        // max-h/overflow-y-auto on DialogContent), the footer's actions
+        // stay reachable without scrolling all the way down.
+        "bg-muted/95 sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t p-4 supports-backdrop-filter:backdrop-blur-sm sm:flex-row sm:justify-end",
         className,
       )}
       {...props}

@@ -47,6 +47,33 @@ const serverEnvSchema = z.object({
   GROQ_API_KEY: optionalString,
   GEMINI_API_KEY: optionalString,
   OPENROUTER_API_KEY: optionalString,
+
+  // Opportunity providers — see src/features/opportunities/providers. Each
+  // adapter's `isConfigured()` checks its own key(s) at call time; the UI
+  // shows an educational empty state for any unconfigured provider instead
+  // of failing. Arbeitnow and RemoteOK need no key (public APIs) and so
+  // have no entry here.
+  ADZUNA_APP_ID: optionalString,
+  ADZUNA_APP_KEY: optionalString,
+  JOOBLE_API_KEY: optionalString,
+  // USAJobs requires both a free API key and a registered contact email
+  // sent as the `User-Agent` header — see https://developer.usajobs.gov.
+  USAJOBS_API_KEY: optionalString,
+  USAJOBS_USER_AGENT: optionalString,
+  REED_API_KEY: optionalString,
+  // Comma-separated Greenhouse/Lever company board tokens to search —
+  // neither platform exposes a directory of "every company hosted here",
+  // so this is the operator-configurable seed list (falls back to a small
+  // set of real, publicly known boards if unset, so the connector works
+  // out of the box; extend via env, not a code change).
+  GREENHOUSE_BOARD_TOKENS: optionalString,
+  LEVER_COMPANY_TOKENS: optionalString,
+
+  // Verifies requests to /api/cron/discovery actually came from Vercel
+  // Cron (or a trusted manual trigger), not the public internet — Vercel
+  // sends this as `Authorization: Bearer <value>` on scheduled invocations.
+  // See https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs.
+  CRON_SECRET: optionalString,
 });
 
 const parsed = serverEnvSchema.safeParse(process.env);

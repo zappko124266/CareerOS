@@ -56,6 +56,11 @@ export const ResumeDataSchema = z.object({
 });
 
 export type ResumeData = z.infer<typeof ResumeDataSchema>;
+export type ResumeContact = z.infer<typeof ResumeContactSchema>;
+export type ResumeExperience = z.infer<typeof ResumeExperienceSchema>;
+export type ResumeEducation = z.infer<typeof ResumeEducationSchema>;
+export type ResumeCertification = z.infer<typeof ResumeCertificationSchema>;
+export type ResumeProject = z.infer<typeof ResumeProjectSchema>;
 
 /**
  * Stored as `ResumeAnalysis.breakdown` (Json). Each dimension is 0-100;

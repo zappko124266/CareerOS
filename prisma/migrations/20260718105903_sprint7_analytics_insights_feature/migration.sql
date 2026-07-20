@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "MeteredFeature" ADD VALUE 'ANALYTICS_INSIGHTS';

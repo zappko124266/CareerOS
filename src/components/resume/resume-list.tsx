@@ -21,7 +21,7 @@ export function ResumeList({ resumes }: { resumes: Resume[] }) {
                   </p>
                 </div>
               </div>
-              <ResumeStatusBadge status={resume.status} />
+              <ResumeStatusBadge status={resume.status} className="shrink-0" />
             </CardContent>
           </Card>
         </Link>

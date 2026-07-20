@@ -42,8 +42,8 @@ export function ResumeContentPreview({ data }: { data: ResumeData }) {
           <div className="flex flex-col gap-4">
             {data.experience.map((entry, index) => (
               <div key={index}>
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="font-medium">
+                <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+                  <p className="min-w-0 font-medium wrap-break-word">
                     {entry.title} · {entry.company}
                   </p>
                   <p className="text-muted-foreground shrink-0 text-xs">
@@ -70,9 +70,9 @@ export function ResumeContentPreview({ data }: { data: ResumeData }) {
             {data.education.map((entry, index) => (
               <div
                 key={index}
-                className="flex items-baseline justify-between gap-2"
+                className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2"
               >
-                <p className="text-sm">
+                <p className="min-w-0 text-sm wrap-break-word">
                   {entry.degree
                     ? `${entry.degree}${entry.field ? `, ${entry.field}` : ""} — `
                     : ""}

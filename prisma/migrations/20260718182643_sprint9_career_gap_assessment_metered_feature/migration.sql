@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "MeteredFeature" ADD VALUE 'CAREER_GAP_ASSESSMENT';

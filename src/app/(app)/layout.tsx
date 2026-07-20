@@ -1,5 +1,7 @@
-import { Navbar } from "@/components/layout/navbar";
+import { AppHeader } from "@/components/layout/app-header";
+import { AppSidebar } from "@/components/layout/app-sidebar";
 import { PageContainer } from "@/components/layout/page-container";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { verifySession } from "@/lib/auth/dal";
 
 export default async function AppLayout({
@@ -12,11 +14,15 @@ export default async function AppLayout({
   const user = await verifySession();
 
   return (
-    <div className="flex min-h-svh flex-col">
-      <Navbar user={user} />
-      <main className="flex-1">
+    <SidebarProvider>
+      <AppSidebar user={user} />
+      {/* `SidebarInset` already renders the <main> landmark — id lives
+          here (not on a nested element) so the skip link and this stay
+          the single <main> on the page. */}
+      <SidebarInset id="main-content">
+        <AppHeader />
         <PageContainer>{children}</PageContainer>
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

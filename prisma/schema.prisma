@@ -22,6 +22,15 @@ enum Role {
   SUPER_ADMIN
 }
 
+/// Billing tier used by the Entitlement Engine (`src/features/entitlements/`).
+/// No payment processor is wired up yet — every profile defaults to FREE and
+/// stays there until a real billing integration exists to move it. This is
+/// deliberately just the plan label, not a subscription/invoice system.
+enum PlanTier {
+  FREE
+  PRO
+}
+
 /// Mirrors a subset of `auth.users` (managed by Supabase Auth) into the
 /// public schema so it can be joined against with Prisma. The `id` is the
 /// same UUID as `auth.users.id` — kept in sync by the trigger defined in
@@ -32,13 +41,93 @@ model Profile {
   fullName  String?  @map("full_name")
   avatarUrl String?  @map("avatar_url")
   role      Role     @default(USER)
+  planTier  PlanTier @default(FREE) @map("plan_tier")
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  auditLogs AuditLog[]
-  resumes   Resume[]
+  auditLogs                   AuditLog[]
+  resumes                     Resume[]
+  opportunities               Opportunity[]
+  accountConnections          AccountConnection[]
+  featureUsageEvents          FeatureUsageEvent[]
+  discoveryPreference         DiscoveryPreference?
+  connectorPreferences        ConnectorPreference[]
+  discoveryRuns               DiscoveryRun[]
+  discoveredListings          DiscoveredListing[]
+  discoveredCompanies         DiscoveredCompany[]
+  entitlementOverrides        EntitlementOverride[] @relation("EntitlementOverrideForUser")
+  entitlementOverridesCreated EntitlementOverride[] @relation("EntitlementOverrideCreatedBy")
+  recruiters                  Recruiter[]
+  careerGoal                  CareerGoal?
+  learningItems               LearningItem[]
+  salaryEstimates             SalaryEstimate[]
+  careerHealthScores          CareerHealthScore[]
+  linkedInProfile             LinkedInProfile?
 
   @@map("profiles")
+}
+
+/// One row per metered action a user takes against an Entitlement-gated
+/// feature (AI Resume Tailoring runs, PDF/DOCX exports). The Entitlement
+/// Engine counts rows in a rolling window against `PLAN_LIMITS` for the
+/// user's `planTier` — real usage, not an estimate.
+enum MeteredFeature {
+  RESUME_TAILORING
+  RESUME_EXPORT
+  APPLICATION_DOCUMENT_GENERATION
+  APPLICATION_REVIEW
+  APPLICATION_EXPORT
+  COMPANY_SNAPSHOT
+  /// Covers one full discovery run (connector search + AI job/company
+  /// ranking) regardless of trigger — a scheduled run that would exceed
+  /// the user's limit is skipped for that cycle, not force-run for free.
+  JOB_DISCOVERY_RUN
+  /// New this sprint — one AI Application Strategy generation (Module 2).
+  APPLICATION_STRATEGY
+  /// New this sprint — one AI Follow-up Engine recommendation (Module 9),
+  /// whether user-triggered or produced by the background cron.
+  FOLLOW_UP_RECOMMENDATION
+  /// New this sprint — one AI Application Analytics insights generation
+  /// (Module 10).
+  ANALYTICS_INSIGHTS
+  /// New this sprint — one AI Interview Coach run: prep-question
+  /// generation (`InterviewPrep`) or a practice-answer critique, both
+  /// count against the same limit since they're one coaching surface.
+  INTERVIEW_PREP
+  /// New this sprint — one AI Company Research generation (caches into
+  /// `Company.aiSummary`, regenerating counts again).
+  COMPANY_RESEARCH
+  /// New this sprint — one persisted Salary Intelligence run.
+  SALARY_ESTIMATE
+  /// New this sprint — one Career Health Engine composite-score
+  /// generation.
+  CAREER_HEALTH_SCORE
+  /// New this sprint — one AI-assisted Offer Comparison (the soft-factor
+  /// scoring across 2+ of the user's own offers).
+  OFFER_COMPARISON
+  /// Sprint 9, Module 8 — one persisted `ExperienceGapAssessment` run for
+  /// a specific opportunity. Distinct from the dashboard's free-form,
+  /// ephemeral Skill Gap card (unmetered) since this one is versioned
+  /// storage tied to a real opportunity, same metering rationale as
+  /// `APPLICATION_STRATEGY`.
+  CAREER_GAP_ASSESSMENT
+  /// Sprint 10, Module 1 — one persisted `LinkedInAnalysis` run (bundles
+  /// SEO, recruiter-visibility, headline/about/experience suggestions,
+  /// and missing-sections into one metered action, same rationale as
+  /// `CAREER_GAP_ASSESSMENT` — distinct from the dashboard's older,
+  /// unmetered, ephemeral single-service LinkedIn checks).
+  LINKEDIN_ANALYSIS
+}
+
+model FeatureUsageEvent {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @map("user_id") @db.Uuid
+  user      Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feature   MeteredFeature
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@index([userId, feature, createdAt])
+  @@map("feature_usage_events")
 }
 
 /// Append-only trail of security-relevant events (auth, authorization,
@@ -87,12 +176,35 @@ model Resume {
   parsedData       Json?        @map("parsed_data")
   aiModel          String?      @map("ai_model")
   createdAt        DateTime     @default(now()) @map("created_at")
-  updatedAt        DateTime     @updatedAt @map("updated_at")
+  updatedAt        DateTime     @default(now()) @updatedAt @map("updated_at")
 
-  analyses ResumeAnalysis[]
+  analyses               ResumeAnalysis[]
+  opportunities          Opportunity[]
+  versions               ResumeVersion[]
+  applicationSubmissions ApplicationSubmission[]
+  applicationStrategies  ApplicationStrategy[]
 
   @@index([userId])
   @@map("resumes")
+}
+
+/// An explicit, user-triggered snapshot of `Resume.parsedData` — created by
+/// "Save version" in the Resume Studio, not on every auto-save (auto-save
+/// just updates `parsedData` in place; see docs/ARCHITECTURE.md#resume-studio).
+/// Powers both Resume Versioning (restore an older snapshot) and Resume
+/// Comparison (diff two snapshots, or a snapshot against the live draft).
+model ResumeVersion {
+  id        String   @id @default(uuid()) @db.Uuid
+  resumeId  String   @map("resume_id") @db.Uuid
+  resume    Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  label     String
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  applicationSubmissions ApplicationSubmission[]
+
+  @@index([resumeId])
+  @@map("resume_versions")
 }
 
 /// One ATS-score + optimization-suggestions run for a Resume. A new row per
@@ -110,4 +222,1329 @@ model ResumeAnalysis {
 
   @@index([resumeId])
   @@map("resume_analyses")
+}
+
+/// Sprint 10, Module 1/9 — the user's live, editable LinkedIn profile
+/// draft (pasted text, not imported: LinkedIn has no public per-user
+/// profile-read API, so this is deliberately the same "paste it in"
+/// pattern the dashboard's pre-existing LinkedIn card already used —
+/// except this one persists, since Module 9 needs to version it and
+/// Module 7's dashboard needs a non-ephemeral score to show). Exact
+/// mirror of `Resume`'s "live draft" role for `ResumeVersion`.
+model LinkedInProfile {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @unique @map("user_id") @db.Uuid
+  user        Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profileText String   @map("profile_text")
+  headline    String?
+  targetRole  String?  @map("target_role")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  versions LinkedInProfileVersion[]
+  analyses LinkedInAnalysis[]
+
+  @@map("linkedin_profiles")
+}
+
+/// Explicit, user-triggered snapshot of `LinkedInProfile`'s fields — exact
+/// mirror of `ResumeVersion` (same "new row per Save version, never
+/// overwritten" convention). Powers Module 9's "LinkedIn V1, V2" history.
+model LinkedInProfileVersion {
+  id        String          @id @default(uuid()) @db.Uuid
+  profileId String          @map("profile_id") @db.Uuid
+  profile   LinkedInProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  label     String
+  data      Json
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@index([profileId])
+  @@map("linkedin_profile_versions")
+}
+
+/// One LinkedIn SEO Intelligence run — a new row per analysis, same
+/// versioned-AI-output convention as `ExperienceGapAssessment`/
+/// `ApplicationStrategy`, never overwritten. `missingSections` is
+/// code-computed (a documented section-header-keyword heuristic over the
+/// pasted text), not AI-guessed — see `features/linkedin-profile/service.ts`.
+///
+/// This orchestrates 5 independent AI slices, at most 2 concurrently
+/// (never all 5 at once — live verification this sprint hit a real
+/// provider timeout and a worker rate limit when they ran unbounded in
+/// parallel). Every AI-sourced field is nullable/empty-able: a failed
+/// slice persists as `null`/`[]` rather than discarding the slices that
+/// *did* succeed or fabricating a fake result. `failedSlices` names
+/// exactly which ones failed, so a retry only re-runs those — an empty
+/// array from a slice that legitimately found nothing to suggest is
+/// otherwise indistinguishable from one that failed, and this field is
+/// what makes "only regenerate what's actually missing" possible instead
+/// of re-running (and re-billing) all 5 every time.
+model LinkedInAnalysis {
+  id                       String          @id @default(uuid()) @db.Uuid
+  profileId                String          @map("profile_id") @db.Uuid
+  profile                  LinkedInProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  seoScore                 Int?            @map("seo_score")
+  recruiterVisibilityScore Int?            @map("recruiter_visibility_score")
+  /// `{keyword, present}[]` — `[]` if the SEO check failed.
+  keywordCoverage          Json            @default("[]") @map("keyword_coverage")
+  /// `string[]` — `[]` if the SEO check failed.
+  missingKeywords          Json            @default("[]") @map("missing_keywords")
+  /// `string[]` — code-computed, see model doc comment above. Always
+  /// available (not an AI call), never null.
+  missingSections          Json            @map("missing_sections")
+  /// `string[]` — `[]` if the headline check failed (or wasn't run, e.g.
+  /// no target role was set).
+  headlineSuggestions      Json            @default("[]") @map("headline_suggestions")
+  /// `{optimizedAbout, keyPointsHighlighted, rationale}` — `null` if the
+  /// About-section check failed.
+  aboutSuggestions         Json?           @map("about_suggestions")
+  /// `{original, suggestion, reason}[]` — `[]` if the experience check
+  /// failed.
+  experienceImprovements   Json            @default("[]") @map("experience_improvements")
+  /// `("seo"|"recruiterVisibility"|"about"|"headline"|"experience")[]` —
+  /// see model doc comment.
+  failedSlices             Json            @default("[]") @map("failed_slices")
+  aiModel                  String          @map("ai_model")
+  createdAt                DateTime        @default(now()) @map("created_at")
+
+  @@index([profileId, createdAt])
+  @@map("linkedin_analyses")
+}
+
+/// Which connector normalized this listing. See
+/// `src/features/opportunities/providers` — one adapter per value here.
+/// `MANUAL` is reserved for a future user-added-opportunity flow; nothing
+/// writes it yet.
+enum OpportunitySource {
+  ADZUNA
+  JOOBLE
+  ARBEITNOW
+  REMOTEOK
+  /// Public, unauthenticated per-company job board API
+  /// (`boards-api.greenhouse.io`) — Greenhouse designed this specifically
+  /// for external embedding, so this is a real, ToS-compliant connector,
+  /// not a scraper. One search fans out across a curated list of company
+  /// board tokens (see `providers/greenhouse.ts`).
+  GREENHOUSE
+  /// Same rationale as Greenhouse — Lever's public `api.lever.co/v0/postings`
+  /// endpoint is designed for external consumption.
+  LEVER
+  /// USAJobs.gov's official public API (free API key, `Authorization-Key`
+  /// header) — the U.S. federal government's own job board, built for
+  /// programmatic search.
+  USAJOBS
+  /// Reed.co.uk's official public API (free API key, HTTP basic auth).
+  REED
+  MANUAL
+}
+
+enum OpportunityType {
+  JOB
+  INTERNSHIP
+  CONTRACT
+  FREELANCE
+  CAMPUS
+}
+
+/// Self-reported progress through an application. CareerOS has no real
+/// integration that can observe employer-side state (an ATS view event, a
+/// recruiter's inbox) for any provider today, so every value past
+/// `DISCOVERED`/`SAVED` is something the *user* marked, not something the
+/// platform verified — the UI must always be honest about that distinction
+/// (see `docs/ARCHITECTURE.md#opportunities`). `APPLIED` intentionally
+/// collapses the spec's "Submitted" and "Application Sent" into one value:
+/// without a real submission channel, CareerOS can't distinguish them.
+enum OpportunityStatus {
+  DISCOVERED
+  SAVED
+  /// New this sprint — the Universal Application Model's "Ready" state:
+  /// the user has decided to apply, but preparation (resume/cover
+  /// letter/etc.) hasn't started yet. Sits between SAVED and PREPARING.
+  READY
+  PREPARING
+  READY_FOR_REVIEW
+  /// New this sprint — the application package is fully prepared and
+  /// waiting on the user to explicitly approve before anything is
+  /// considered "submitted". CareerOS never submits without this.
+  AWAITING_APPROVAL
+  APPLIED
+  APPLICATION_VIEWED
+  RECRUITER_CONTACT
+  SHORTLISTED
+  /// New this sprint — an assessment/test stage distinct from a live
+  /// interview.
+  ASSESSMENT
+  INTERVIEWING
+  OFFER
+  ACCEPTED
+  /// New this sprint — the user declined an offer (distinct from the
+  /// employer rejecting the candidate — see REJECTED).
+  DECLINED
+  /// New this sprint — the employer rejected the candidate. Previously
+  /// the only place a rejection could land was the catch-all ARCHIVED;
+  /// this sprint's Application Tracker needs to distinguish "rejected"
+  /// from "I archived this for other reasons" for accurate analytics.
+  REJECTED
+  /// New this sprint — the user withdrew their own application.
+  WITHDRAWN
+  JOINED
+  ARCHIVED
+}
+
+/// A user-saved opportunity: a normalized snapshot of an external listing,
+/// captured once (at save time) so it survives the source provider's
+/// listing changing or expiring. Live search results themselves are never
+/// persisted — only once a user acts on one does it become a row here,
+/// which is also what turns it into an Application Workspace.
+model Opportunity {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  source         OpportunitySource
+  sourceId       String            @map("source_id")
+  type           OpportunityType   @default(JOB)
+  title          String
+  companyName    String            @map("company_name")
+  /// Resolved/created by normalized name when an opportunity is saved
+  /// (`features/companies/service.ts`'s `resolveOrCreateCompany`) —
+  /// nullable and `SetNull` so existing rows (and any future save path
+  /// that doesn't resolve one) stay valid; `companyName` above remains
+  /// the source of truth for display, this is purely the graph edge into
+  /// `Company`'s cross-opportunity structured data.
+  companyId      String?           @map("company_id") @db.Uuid
+  company        Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  location       String?
+  remote         Boolean           @default(false)
+  employmentType String?           @map("employment_type")
+  salaryMin      Int?              @map("salary_min")
+  salaryMax      Int?              @map("salary_max")
+  salaryCurrency String?           @map("salary_currency")
+  description    String
+  /// string[] of skill/tag keywords as reported by the source provider —
+  /// validated at the application boundary against `OpportunitySkillsSchema`
+  /// (src/features/opportunities/schema.ts), same Json-not-relational
+  /// rationale as `Resume.parsedData`.
+  skills         Json              @default("[]")
+  applyUrl       String            @map("apply_url")
+
+  status          OpportunityStatus @default(SAVED)
+  /// Append-only [{status, changedAt}] audit trail powering the Timeline
+  /// view — written to, never overwritten, whenever `status` changes.
+  statusHistory   Json              @default("[]") @map("status_history")
+  /// [{id, label, done}] prep checklist — always read/written as a whole,
+  /// same rationale as `skills` above.
+  checklist       Json              @default("[]")
+  coverLetter     String?           @map("cover_letter")
+  recruiterNotes  String?           @map("recruiter_notes")
+  resumeId        String?           @map("resume_id") @db.Uuid
+  resume          Resume?           @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  /// `[{ question, answer }]` — Module 6's "Custom Questions" (application
+  /// form questions specific to this listing, e.g. "Why do you want to
+  /// work here?"). Kept as a lightweight field on `Opportunity` rather
+  /// than a new model, same "variable-shape, always read/written as a
+  /// whole" rationale as `skills`/`checklist` above.
+  customQuestions Json              @default("[]") @map("custom_questions")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  interviewNotes           InterviewNote[]
+  applicationDocuments     ApplicationDocument[]
+  applicationReviews       ApplicationReview[]
+  companySnapshot          CompanySnapshot?
+  discoveredListing        DiscoveredListing?
+  submissions              ApplicationSubmission[]
+  strategies               ApplicationStrategy[]
+  followUpRecommendations  FollowUpRecommendation[]
+  interviews               Interview[]
+  recruiterInteractions    RecruiterInteraction[]
+  offer                    Offer?
+  experienceGapAssessments ExperienceGapAssessment[]
+
+  // One saved row per distinct external listing per user — re-saving the
+  // same provider listing updates it instead of duplicating it.
+  @@unique([userId, source, sourceId])
+  @@index([userId])
+  @@index([userId, status])
+  @@map("opportunities")
+}
+
+/// Which of the three Application Studio document types a row is — the one
+/// discriminator every other Application Studio concept (generation,
+/// versioning, export) branches on instead of having three near-identical
+/// models/services/UI trees. See `docs/ARCHITECTURE.md#application-studio`.
+enum ApplicationDocumentKind {
+  COVER_LETTER
+  EMAIL
+  RECRUITER_MESSAGE
+}
+
+/// Only meaningful for EMAIL and RECRUITER_MESSAGE kinds (a cover letter
+/// has no further subtype — its shaping input is `audience` instead).
+/// Kept as one enum spanning both kinds, rather than two separate nullable
+/// columns, since a document only ever has one kind and therefore only
+/// ever needs one of these two value sets populated.
+enum ApplicationDocumentSubtype {
+  // EMAIL
+  APPLICATION_EMAIL
+  RECRUITER_EMAIL
+  HIRING_MANAGER_EMAIL
+  COLD_OUTREACH
+  REFERRAL_REQUEST
+  FOLLOW_UP
+  INTERVIEW_CONFIRMATION
+  INTERVIEW_REMINDER
+  INTERVIEW_THANK_YOU
+  SALARY_NEGOTIATION
+  OFFER_ACCEPTANCE
+  OFFER_DECLINE
+  // RECRUITER_MESSAGE
+  LINKEDIN_MESSAGE
+  NETWORKING_MESSAGE
+  TALENT_COMMUNITY_MESSAGE
+  /// New this sprint — the AI Recruiter Outreach module's "Application
+  /// Reminder" type (a nudge to a recruiter/hiring manager, distinct from
+  /// FOLLOW_UP's broader "checking in" framing).
+  APPLICATION_REMINDER
+  /// Sprint 10, Module 6 — a short, DM-length thank-you for a
+  /// RECRUITER_MESSAGE, distinct from EMAIL's INTERVIEW_THANK_YOU (a
+  /// longer, formal email norm).
+  THANK_YOU_MESSAGE
+}
+
+/// Only meaningful for COVER_LETTER — who it's addressed to / written for,
+/// shapes tone and content emphasis at generation time.
+enum ApplicationDocumentAudience {
+  HIRING_MANAGER
+  RECRUITER
+  REFERRAL
+  FRESHER
+  EXPERIENCED
+  INTERNSHIP
+  EXECUTIVE
+  /// 5 new this sprint — Cover Letter Engine variants requested by
+  /// Sprint 7 that the existing audience list didn't cover.
+  STARTUP
+  ENTERPRISE
+  REMOTE
+  GOVERNMENT
+  COMPANY
+}
+
+enum ApplicationDocumentTone {
+  PROFESSIONAL
+  FRIENDLY
+  EXECUTIVE
+  TECHNICAL
+  CREATIVE
+}
+
+enum ApplicationDocumentLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
+enum ApplicationDocumentStatus {
+  DRAFT
+  ARCHIVED
+}
+
+/// The live, editable draft for one Cover Letter / Email / Recruiter
+/// Message. Mirrors `Resume.parsedData`'s pattern: this row is what the
+/// editor reads/writes on every save, and `ApplicationDocumentVersion`
+/// below is the explicit, user-triggered checkpoint — never written to
+/// automatically.
+model ApplicationDocument {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  kind        ApplicationDocumentKind
+  subtype     ApplicationDocumentSubtype?
+  audience    ApplicationDocumentAudience?
+  tone        ApplicationDocumentTone?
+  length      ApplicationDocumentLength?
+  title       String
+  /// Only meaningful for `kind: EMAIL` — rendered/edited above the body in
+  /// the editor, included in exports, ignored for COVER_LETTER/RECRUITER_MESSAGE.
+  subjectLine String?                      @map("subject_line")
+  content     String
+  status      ApplicationDocumentStatus    @default(DRAFT)
+  aiModel     String?                      @map("ai_model")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  versions ApplicationDocumentVersion[]
+
+  submissionsAsCoverLetter      ApplicationSubmission[] @relation("SubmissionCoverLetter")
+  submissionsAsRecruiterMessage ApplicationSubmission[] @relation("SubmissionRecruiterMessage")
+  submissionsAsEmail            ApplicationSubmission[] @relation("SubmissionEmail")
+
+  @@index([opportunityId])
+  @@index([opportunityId, kind])
+  @@map("application_documents")
+}
+
+/// An explicit, user-triggered snapshot of `ApplicationDocument.content`
+/// (and `subjectLine`, for EMAIL documents) — same rationale and shape as
+/// `ResumeVersion`. Powers restore, compare, and Application History.
+model ApplicationDocumentVersion {
+  id          String              @id @default(uuid()) @db.Uuid
+  documentId  String              @map("document_id") @db.Uuid
+  document    ApplicationDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  label       String
+  content     String
+  subjectLine String?             @map("subject_line")
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  @@index([documentId])
+  @@map("application_document_versions")
+}
+
+/// One AI Application Review run for an Opportunity — analyzes whatever
+/// resume/cover letter/email content exists at the time it's run and
+/// returns a transparent readiness breakdown alongside qualitative
+/// findings. A new row per run (not overwritten), same convention as
+/// `ResumeAnalysis`, so readiness visibly changes as the application
+/// package improves. `readinessScore` and every score inside `factors` are
+/// AI estimates computed from real inputs, never a guaranteed hiring
+/// probability — the UI must always present them as such.
+model ApplicationReview {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  readinessScore       Int      @map("readiness_score")
+  /// `{ resumeQuality, jobMatch, coverLetterQuality, emailQuality,
+  /// keywordCoverage, requiredSkillsCoverage, linkedinCompleteness }`, each
+  /// `{ score, explanation, available }` — see
+  /// `features/career-intelligence/applications/review/schema.ts`.
+  factors              Json
+  strengths            Json
+  weaknesses           Json
+  missingKeywords      Json     @map("missing_keywords")
+  missingSkills        Json     @map("missing_skills")
+  suggestions          Json
+  recruiterPerspective String   @map("recruiter_perspective")
+  atsPerspective       String   @map("ats_perspective")
+  aiModel              String   @map("ai_model")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([opportunityId])
+  @@map("application_reviews")
+}
+
+/// Cached AI summary of the company/role for one Opportunity — one row
+/// per opportunity (regenerated in place, not appended), since this is a
+/// cache of a derived summary, not a history that needs to be kept. Every
+/// field here is AI-generated from the job listing's own text; verified
+/// data (company name, location, salary, etc.) already lives on
+/// `Opportunity` itself and is rendered separately so the UI can keep the
+/// two visually distinct, per the sprint's "never fabricate company
+/// information" requirement.
+model CompanySnapshot {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @unique @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  aiSummary    String @map("ai_summary")
+  /// string[] — concrete facts the listing text actually states.
+  aiHighlights Json   @map("ai_highlights")
+  /// string[] — standard facts (industry, size, funding) the listing does
+  /// NOT state, kept explicit so the UI can show what's unknown rather
+  /// than let the summary's confident prose imply completeness.
+  aiCaveats    Json   @map("ai_caveats")
+  aiModel      String @map("ai_model")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("company_snapshots")
+}
+
+/// Schema-level groundwork for Interview Management (Sprint 3): free-text
+/// prep notes tied to an opportunity, optionally time-boxed to a scheduled
+/// interview. Implementation beyond this model — calendar sync, invite
+/// parsing, mock-interview tooling — is explicitly out of scope this
+/// sprint; this exists so that work has a real table to land in later
+/// instead of starting from nothing.
+model InterviewNote {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  /// New this sprint — optionally attaches a note to one specific
+  /// structured `Interview` round rather than just the parent
+  /// opportunity, now that Interview Management (this model's own doc
+  /// comment called it "groundwork" for) is actually built. Nullable so
+  /// every note written before this sprint (and any note taken before an
+  /// `Interview` round exists yet) stays valid.
+  interviewId   String?     @map("interview_id") @db.Uuid
+  interview     Interview?  @relation(fields: [interviewId], references: [id], onDelete: SetNull)
+  scheduledAt   DateTime?   @map("scheduled_at")
+  note          String
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([opportunityId])
+  @@index([interviewId])
+  @@map("interview_notes")
+}
+
+enum ConnectionProvider {
+  LINKEDIN
+  NAUKRI
+  INDEED
+  FOUNDIT
+  WELLFOUND
+  APNA
+  INTERNSHALA
+}
+
+/// `NOT_AVAILABLE` is the only status any row can honestly have this
+/// sprint — see the model doc comment below.
+enum ConnectionStatus {
+  NOT_AVAILABLE
+  PENDING
+  CONNECTED
+  EXPIRED
+  ERROR
+}
+
+/// Schema-level groundwork for the Account Connections framework. No
+/// provider here has a real, officially-supported OAuth/partner API
+/// available for individual-user job-application automation today, so
+/// nothing in this sprint ever writes a row with `status` other than
+/// `NOT_AVAILABLE` — the UI says so plainly instead of offering a "Connect"
+/// button that can't actually connect anything (see
+/// docs/ARCHITECTURE.md#opportunities). `accessToken`/`refreshToken` are
+/// nullable and unused today; whoever wires up the first real connector
+/// must encrypt them at rest (e.g. pgcrypto or app-level envelope
+/// encryption) before this model ever stores a live token — plaintext
+/// token columns are acceptable only while they're always null.
+model AccountConnection {
+  id           String             @id @default(uuid()) @db.Uuid
+  userId       String             @map("user_id") @db.Uuid
+  user         Profile            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     ConnectionProvider
+  status       ConnectionStatus   @default(NOT_AVAILABLE)
+  accessToken  String?            @map("access_token")
+  refreshToken String?            @map("refresh_token")
+  scopes       Json               @default("[]")
+  expiresAt    DateTime?          @map("expires_at")
+  lastSyncedAt DateTime?          @map("last_synced_at")
+  lastError    String?            @map("last_error")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("account_connections")
+}
+
+enum DiscoveryFrequency {
+  HOURLY
+  DAILY
+  WEEKLY
+  MANUAL_ONLY
+}
+
+enum ExperienceLevel {
+  ENTRY
+  MID
+  SENIOR
+  LEAD
+  EXECUTIVE
+}
+
+enum AvailabilityWindow {
+  IMMEDIATE
+  TWO_WEEKS
+  ONE_MONTH
+  FLEXIBLE
+  NOT_LOOKING
+}
+
+/// One row per user — everything the AI Search Strategy and background
+/// discovery runs read to decide what to search for and where. Every
+/// array field is Json (`string[]`), validated at the application boundary
+/// against `DiscoveryPreferenceSchema` (`src/features/discovery/schema.ts`),
+/// same "variable-shape, always read/written as a whole" rationale as
+/// `Resume.parsedData`.
+model DiscoveryPreference {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @unique @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  preferredRoles     Json @default("[]") @map("preferred_roles")
+  preferredCompanies Json @default("[]") @map("preferred_companies")
+  companyBlacklist   Json @default("[]") @map("company_blacklist")
+  companyWhitelist   Json @default("[]") @map("company_whitelist")
+  industries         Json @default("[]")
+  keywords           Json @default("[]")
+
+  salaryMin      Int?    @map("salary_min")
+  salaryMax      Int?    @map("salary_max")
+  salaryCurrency String? @map("salary_currency")
+
+  remote Boolean @default(true)
+  hybrid Boolean @default(true)
+  onsite Boolean @default(true)
+
+  /// Composite location strings, e.g. `"IN"`, `"IN:MH"`, `"IN:MH:Mumbai"` —
+  /// country/state/city ISO codes and names from `country-state-city`
+  /// (see `src/features/location/`), never a hand-maintained list.
+  countries                     Json    @default("[]")
+  states                        Json    @default("[]")
+  cities                        Json    @default("[]")
+  radiusKm                      Int?    @map("radius_km")
+  openToRelocation              Boolean @default(false) @map("open_to_relocation")
+  openToInternationalRelocation Boolean @default(false) @map("open_to_international_relocation")
+
+  experienceLevel    ExperienceLevel?    @map("experience_level")
+  availability       AvailabilityWindow?
+  discoveryFrequency DiscoveryFrequency  @default(DAILY) @map("discovery_frequency")
+  /// In-app only today — no email/SMS delivery channel exists yet (see
+  /// `docs/ARCHITECTURE.md#job-discovery-engine`); exposing an "email me"
+  /// toggle that silently does nothing would be its own kind of dishonest
+  /// UI, so this preference only controls whether the Daily Career Agent
+  /// briefing appears in-app.
+  notifyInApp        Boolean             @default(true) @map("notify_in_app")
+
+  /// New this sprint (Module 4 extension) — free text, e.g. "51-200" or
+  /// "Startup (1-50)"; no canonical size taxonomy exists anywhere in this
+  /// codebase (see `Company.sizeEstimate`'s identical free-text,
+  /// always-an-estimate convention), so this stays a plain string rather
+  /// than a fabricated enum of size bands.
+  preferredCompanySize    String?  @map("preferred_company_size")
+  visaSponsorshipRequired Boolean? @map("visa_sponsorship_required")
+  travelWillingness       String?  @map("travel_willingness")
+  shiftPreference         String?  @map("shift_preference")
+  joiningTimeline         String?  @map("joining_timeline")
+  languages               Json     @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("discovery_preferences")
+}
+
+/// Per-user, per-connector marketplace state (enabled/disabled, favorite,
+/// recently used, jobs found) — deliberately separate from
+/// `AccountConnection`, which models OAuth-style linking a user's own
+/// platform account (a different, still-unbuilt concern, see its own doc
+/// comment). `connectorId` is a plain string matching an id in the static
+/// `CONNECTOR_CATALOG` (`src/features/discovery/connectors/catalog.ts`),
+/// not a Prisma enum — adding a new catalog-only connector (most of the
+/// 34+ platforms this sprint catalogs) never needs a migration; only a
+/// connector that gets a real, working search adapter needs one (to add
+/// its `OpportunitySource` enum value), same as today.
+model ConnectorPreference {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  connectorId String    @map("connector_id")
+  enabled     Boolean   @default(true)
+  favorited   Boolean   @default(false)
+  lastUsedAt  DateTime? @map("last_used_at")
+  jobsFound   Int       @default(0) @map("jobs_found")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, connectorId])
+  @@index([userId])
+  @@map("connector_preferences")
+}
+
+enum DiscoveryTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+/// One row per background (or manual "Discover now") discovery run — the
+/// source of the real, verified counts the Daily Career Agent reports
+/// ("we found 31 new opportunities"). Never estimated after the fact;
+/// written once, at the end of `runDiscovery`, from what was actually
+/// found.
+model DiscoveryRun {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  triggeredBy     DiscoveryTrigger @map("triggered_by")
+  connectorsUsed  Json             @default("[]") @map("connectors_used")
+  jobsFound       Int              @default(0) @map("jobs_found")
+  newJobsFound    Int              @default(0) @map("new_jobs_found")
+  companiesFound  Int              @default(0) @map("companies_found")
+  /// New this sprint (Module 6 — Duplicate Engine) — real count of
+  /// listings this run recognized as the same real-world job already
+  /// discovered from a different source, and therefore did NOT surface as
+  /// a second independent listing. See `DiscoveredListing.duplicateOfId`.
+  duplicatesFound Int              @default(0) @map("duplicates_found")
+  /// `[{ connectorId, message }]` — a connector failing never fails the
+  /// whole run (same `Promise.allSettled` discipline as
+  /// `searchOpportunities`), just gets recorded here.
+  errors          Json             @default("[]")
+
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  listings  DiscoveredListing[]
+  companies DiscoveredCompany[]
+
+  @@index([userId, startedAt])
+  @@map("discovery_runs")
+}
+
+/// What the user does with a discovery-feed item before (or instead of)
+/// saving it as a real `Opportunity`. Shared by jobs and companies rather
+/// than two near-identical enums.
+enum DiscoveryDisposition {
+  NEW
+  SAVED
+  HIDDEN
+  REJECTED
+}
+
+/// A job listing the discovery engine found — the pre-save candidate
+/// shown in the Discovery Feed. Distinct from `Opportunity` for the same
+/// reason search results were never persisted before this sprint: only
+/// once a user acts on one (saves it) does it become a real `Opportunity`
+/// row (`savedOpportunityId`); everything else here can be hidden,
+/// rejected, or simply superseded by the next run without ever having
+/// been a "real" saved opportunity.
+model DiscoveredListing {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  source   OpportunitySource
+  sourceId String            @map("source_id")
+
+  title          String
+  companyName    String    @map("company_name")
+  location       String?
+  remote         Boolean   @default(false)
+  employmentType String?   @map("employment_type")
+  salaryMin      Int?      @map("salary_min")
+  salaryMax      Int?      @map("salary_max")
+  salaryCurrency String?   @map("salary_currency")
+  description    String
+  skills         Json      @default("[]")
+  applyUrl       String    @map("apply_url")
+  postedAt       DateTime? @map("posted_at")
+
+  disposition DiscoveryDisposition @default(NEW)
+
+  /// 0-100 overall rank from the Job Ranking service, and the explainable
+  /// per-factor breakdown behind it — never shown as a bare number without
+  /// `matchFactors` alongside it (see `## Application Studio`'s identical
+  /// readiness-transparency rule, applied here to job ranking).
+  matchScore   Int?  @map("match_score")
+  matchFactors Json? @map("match_factors")
+
+  /// New this sprint (Module 6 — Duplicate Engine) — normalized
+  /// `"${companyName}|${title}"` (lowercased, trimmed, whitespace-collapsed),
+  /// computed once at upsert time in `features/discovery/dedupe.ts`. Used
+  /// only to look up cross-*source* matches within a time window; never
+  /// unique-constrained itself, since two real, distinct roles can
+  /// legitimately share a fingerprint (e.g. two different "Software
+  /// Engineer" openings at the same company) — the time-window + source
+  /// check in code is what decides a real duplicate, this column just
+  /// makes that lookup fast.
+  fingerprint String? @map("fingerprint")
+
+  /// Non-null means this row is a same-real-world-job duplicate of another
+  /// listing from a *different* source — set instead of ever deleting or
+  /// hiding the data. `listDiscoveredListings` excludes rows with this set
+  /// so the feed never shows the same job twice; the original stays fully
+  /// intact and reachable.
+  duplicateOfId String?             @map("duplicate_of_id") @db.Uuid
+  duplicateOf   DiscoveredListing?  @relation("DuplicateOf", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates    DiscoveredListing[] @relation("DuplicateOf")
+
+  discoveryRunId String?       @map("discovery_run_id") @db.Uuid
+  discoveryRun   DiscoveryRun? @relation(fields: [discoveryRunId], references: [id], onDelete: SetNull)
+
+  savedOpportunityId String?      @unique @map("saved_opportunity_id") @db.Uuid
+  savedOpportunity   Opportunity? @relation(fields: [savedOpportunityId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, source, sourceId])
+  @@index([userId, disposition])
+  @@index([userId, fingerprint])
+  @@map("discovered_listings")
+}
+
+/// A company the discovery engine found matching the user's profile —
+/// aggregated from the listings in a discovery run, not a separate live
+/// data source. `openRoles` is a real, computed count (how many listings
+/// from this company appeared in the batch), never an AI-invented hiring
+/// statistic.
+model DiscoveredCompany {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyName String @map("company_name")
+  openRoles   Int    @default(0) @map("open_roles")
+
+  matchScore       Int?  @map("match_score")
+  matchFactors     Json? @map("match_factors")
+  /// From reusing `analyzeSkillGap` against this company's own listings'
+  /// combined requirements — "what to improve to become eligible", not a
+  /// separate bespoke AI call.
+  eligibilityNotes Json  @default("[]") @map("eligibility_notes")
+
+  disposition DiscoveryDisposition @default(NEW)
+
+  discoveryRunId String?       @map("discovery_run_id") @db.Uuid
+  discoveryRun   DiscoveryRun? @relation(fields: [discoveryRunId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, companyName])
+  @@index([userId, disposition])
+  @@map("discovered_companies")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 7 — AI Application Automation Engine
+// ---------------------------------------------------------------------------
+
+/// How a submission was actually carried out. `OFFICIAL_API` is reserved
+/// and documented-as-unused today — same honesty pattern as
+/// `AccountConnection.NOT_AVAILABLE` and `OpportunitySource`'s connector
+/// list: CareerOS has confirmed no job platform offers a real third-party
+/// application-submission API (Greenhouse/Lever's public APIs are
+/// read-only job-board listing APIs), and the sprint explicitly forbids
+/// bypassing login/anti-automation protections. Every submission this
+/// sprint can create is therefore a *user-confirmed, self-reported*
+/// record of something the user did themselves — never something
+/// CareerOS did on their behalf.
+enum SubmissionMethod {
+  /// The user applied directly on the company's own career site/ATS in
+  /// their own browser, then came back and told CareerOS "I applied".
+  COMPANY_CAREER_PAGE_MANUAL
+  /// The user sent (or CareerOS opened a pre-filled `mailto:` for them to
+  /// send) an application email, then confirmed it was sent.
+  EMAIL_MANUAL
+  /// The user opened the listing's `applyUrl` from CareerOS (with their
+  /// prepared resume/cover letter ready to attach) and confirmed
+  /// afterward that they completed the application.
+  USER_APPROVED_BROWSER_MANUAL
+  /// Reserved — not used by any code path today. See doc comment above.
+  OFFICIAL_API
+}
+
+enum SubmissionResult {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+/// One row per submission attempt for an Opportunity — Module 1's
+/// "Submission Method, Retry Count" and Module 7's "Store: Submission
+/// Time, Connector, Method, Result, Retry History, Failure Reason". A
+/// failed/abandoned attempt is never deleted, only superseded by a new
+/// row on retry, so the full retry history stays visible.
+model ApplicationSubmission {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  method SubmissionMethod
+  result SubmissionResult @default(PENDING)
+
+  /// Snapshot of `Opportunity.source` at submission time — kept alongside
+  /// the submission (not just read via the relation) so a submission's
+  /// recorded connector never changes if the opportunity is edited later.
+  connectorSource OpportunitySource @map("connector_source")
+
+  resumeId                   String?              @map("resume_id") @db.Uuid
+  resume                     Resume?              @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  resumeVersionId            String?              @map("resume_version_id") @db.Uuid
+  resumeVersion              ResumeVersion?       @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+  coverLetterDocumentId      String?              @map("cover_letter_document_id") @db.Uuid
+  coverLetterDocument        ApplicationDocument? @relation("SubmissionCoverLetter", fields: [coverLetterDocumentId], references: [id], onDelete: SetNull)
+  recruiterMessageDocumentId String?              @map("recruiter_message_document_id") @db.Uuid
+  recruiterMessageDocument   ApplicationDocument? @relation("SubmissionRecruiterMessage", fields: [recruiterMessageDocumentId], references: [id], onDelete: SetNull)
+  emailDocumentId            String?              @map("email_document_id") @db.Uuid
+  emailDocument              ApplicationDocument? @relation("SubmissionEmail", fields: [emailDocumentId], references: [id], onDelete: SetNull)
+
+  submittedAt   DateTime? @map("submitted_at")
+  retryCount    Int       @default(0) @map("retry_count")
+  failureReason String?   @map("failure_reason")
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([opportunityId])
+  @@map("application_submissions")
+}
+
+/// One AI Application Strategy run for an Opportunity (Module 2) — what
+/// to prepare before applying, and why. A new row per run, never
+/// overwritten, same versioned-AI-output convention as `ApplicationReview`
+/// and `ResumeAnalysis`, so the strategy visibly changes as the
+/// application package and job match evolve.
+model ApplicationStrategy {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  bestResumeId String? @map("best_resume_id") @db.Uuid
+  bestResume   Resume? @relation(fields: [bestResumeId], references: [id], onDelete: SetNull)
+
+  needsTailoring        Boolean @map("needs_tailoring")
+  needsAtsOptimization  Boolean @map("needs_ats_optimization")
+  needsCoverLetter      Boolean @map("needs_cover_letter")
+  needsRecruiterMessage Boolean @map("needs_recruiter_message")
+  needsPortfolio        Boolean @map("needs_portfolio")
+  needsCertifications   Boolean @map("needs_certifications")
+  needsLinkedinUpdate   Boolean @map("needs_linkedin_update")
+  needsResumeRewrite    Boolean @map("needs_resume_rewrite")
+  needsSkillImprovement Boolean @map("needs_skill_improvement")
+
+  confidence Int  @map("confidence")
+  /// `{ bestResume, needsTailoring, needsAtsOptimization, ... }` — one
+  /// explanation string per factor above, keyed the same way. Every AI
+  /// decision here must be explainable (sprint rule); the UI renders
+  /// each flag next to its own `reasoning[key]` rather than a single
+  /// undifferentiated paragraph.
+  reasoning  Json
+
+  aiModel   String   @map("ai_model")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([opportunityId])
+  @@map("application_strategies")
+}
+
+/// Sprint 9, Module 7/8 — persisted output of `analyzeExperienceGap`,
+/// versioned exactly like `ApplicationStrategy` (one new row per run,
+/// never overwritten). Shared by two consumers: Module 7's
+/// `careerGapReadiness` score factor reads the *latest* row instead of
+/// triggering a fresh AI call on every score view (keeping
+/// `computeOpportunityScoreV2` AI-free and instant), and Module 8's
+/// Career Gap panel is what actually generates new rows.
+model ExperienceGapAssessment {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  /// `ExperienceGapSchema[]` — `{ requirement, currentLevel, requiredLevel, severity }`
+  gaps                  Json
+  overallReadiness      Int  @map("overall_readiness")
+  mitigationSuggestions Json @map("mitigation_suggestions")
+
+  aiModel   String   @map("ai_model")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([opportunityId, createdAt])
+  @@map("experience_gap_assessments")
+}
+
+/// What the AI Follow-up Engine (Module 9) recommends doing next for an
+/// Opportunity that's already been applied to.
+enum FollowUpRecommendationType {
+  FOLLOW_UP_NOW
+  WAIT
+  SEND_REMINDER
+  UPDATE_RESUME
+  WITHDRAW
+  APPLY_ELSEWHERE
+}
+
+/// One AI Follow-up recommendation run for an Opportunity — a new row per
+/// run (not overwritten), same versioned convention as
+/// `ApplicationStrategy`, so the recommendation history stays visible as
+/// time passes and the application's status changes.
+model FollowUpRecommendation {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  recommendationType FollowUpRecommendationType @map("recommendation_type")
+  reasoning          String
+  confidence         Int
+
+  aiModel   String   @map("ai_model")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([opportunityId])
+  @@map("follow_up_recommendations")
+}
+
+/// Admin Application Center's "Manual Entitlement Override" (Module 11) —
+/// extends (never replaces) the plan-tier `PLAN_LIMITS` system in
+/// `src/features/entitlements/service.ts`: `checkEntitlement` checks for a
+/// row here first, and only falls back to the plan-tier default when none
+/// exists. `customLimit: null` means unlimited for that user/feature,
+/// same convention `PLAN_LIMITS` already uses for PRO. Every override is
+/// itself audited (`createdByUserId` + an `AuditLog` row written by the
+/// admin action that creates/updates it) — Module 11's "Everything
+/// audited" rule.
+model EntitlementOverride {
+  id      String         @id @default(uuid()) @db.Uuid
+  userId  String         @map("user_id") @db.Uuid
+  user    Profile        @relation("EntitlementOverrideForUser", fields: [userId], references: [id], onDelete: Cascade)
+  feature MeteredFeature
+
+  customLimit Int?   @map("custom_limit")
+  reason      String
+
+  createdByUserId String  @map("created_by_user_id") @db.Uuid
+  createdByUser   Profile @relation("EntitlementOverrideCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, feature])
+  @@map("entitlement_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 8 — Career Intelligence Foundation (Knowledge Graph)
+// ---------------------------------------------------------------------------
+
+/// A real, canonical company — global and shared across every user (keyed
+/// by `normalizedName`, not per-user) so AI research on one company
+/// benefits everyone who later applies there, and so aggregate stats
+/// (salary range, hiring frequency, interview difficulty) are real
+/// cross-user signal instead of each user re-deriving their own. Known
+/// limitation, documented rather than hidden: two unrelated real
+/// companies that happen to share an exact name string will share this
+/// row — there is no verified external company ID (Crunchbase/LinkedIn
+/// Company API) to disambiguate against. `aiSummary`/`aiHighlights`/
+/// `aiCaveats` follow the exact same honesty pattern as `CompanySnapshot`
+/// (grounded only in real job-description text CareerOS has actually seen
+/// for this company, never general model knowledge presented as fact,
+/// and regenerated in place — a cache, not a history). Every other
+/// "Company Intelligence" field the sprint brief asks for (remote-policy
+/// split, locations, salary range, hiring frequency, application-method
+/// distribution, interview difficulty) is deliberately NOT a column here
+/// — those are computed live from this company's own
+/// `Opportunity`/`Interview`/`ApplicationSubmission` rows in
+/// `features/companies/service.ts`, so they're always real and can never
+/// go stale.
+model Company {
+  id               String  @id @default(uuid()) @db.Uuid
+  name             String
+  normalizedName   String  @unique @map("normalized_name")
+  industry         String?
+  businessCategory String? @map("business_category")
+  /// Free text, always phrased as an estimate (e.g. "51-200 employees
+  /// (estimated)") — no real headcount data source exists.
+  sizeEstimate     String? @map("size_estimate")
+
+  aiSummary    String? @map("ai_summary")
+  aiHighlights Json    @default("[]") @map("ai_highlights")
+  aiCaveats    Json    @default("[]") @map("ai_caveats")
+  aiModel      String? @map("ai_model")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  opportunities Opportunity[]
+  recruiters    Recruiter[]
+
+  @@map("companies")
+}
+
+/// Entirely user-entered — a recruiter is personal, user-observed data
+/// about a real person, with no verified external identity source (no
+/// LinkedIn People API access), so unlike `Company` this is scoped
+/// per-user rather than shared: one user's note about "Jane at Google"
+/// should never surface to a different user.
+model Recruiter {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  companyId   String?  @map("company_id") @db.Uuid
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  title       String?
+  linkedinUrl String?  @map("linkedin_url")
+  email       String?
+  notes       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  interactions RecruiterInteraction[]
+  interviews   Interview[]
+
+  @@index([userId])
+  @@map("recruiters")
+}
+
+enum RecruiterInteractionType {
+  VIEWED_PROFILE
+  CONTACTED
+  REPLIED
+  INTERVIEW_REQUESTED
+  REJECTED
+  GHOSTED
+  HIRED
+}
+
+/// Entirely user-entered/self-reported — CareerOS has no real visibility
+/// into a recruiter's actual actions, so every row here is something the
+/// user told CareerOS happened, never inferred or fabricated.
+model RecruiterInteraction {
+  id          String    @id @default(uuid()) @db.Uuid
+  recruiterId String    @map("recruiter_id") @db.Uuid
+  recruiter   Recruiter @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  type       RecruiterInteractionType
+  note       String?
+  occurredAt DateTime                 @map("occurred_at")
+  createdAt  DateTime                 @default(now()) @map("created_at")
+
+  @@index([recruiterId])
+  @@index([opportunityId])
+  @@map("recruiter_interactions")
+}
+
+enum InterviewStage {
+  APPLIED
+  SCREENING
+  TECHNICAL
+  MANAGER
+  HR
+  FINAL
+  OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+/// The structured interview pipeline/workspace entity `InterviewNote` was
+/// always schema-level groundwork for (see that model's own doc comment)
+/// — one row per interview loop for an opportunity (almost always exactly
+/// one, but not constrained to, since some roles run parallel loops).
+/// `stageHistory` mirrors `Opportunity.statusHistory`'s exact append-only
+/// convention, written only through `transitionInterviewStage`
+/// (`features/interviews/service.ts`) so it can never drift out of sync
+/// with `stage`.
+model Interview {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  recruiterId String?    @map("recruiter_id") @db.Uuid
+  recruiter   Recruiter? @relation(fields: [recruiterId], references: [id], onDelete: SetNull)
+
+  stage        InterviewStage @default(APPLIED)
+  stageHistory Json           @default("[]") @map("stage_history")
+
+  scheduledAt      DateTime? @map("scheduled_at")
+  roundLabel       String?   @map("round_label")
+  feedback         String?
+  /// Self-reported 1-5 difficulty rating, entered by the user after the
+  /// round — the only honest source for a company's "Interview
+  /// Difficulty": CareerOS has no Glassdoor-style external data, so this
+  /// is real (if small-sample) first-party signal, aggregated across
+  /// users per company in `features/companies/service.ts`, never a
+  /// fabricated rating.
+  difficultyRating Int?      @map("difficulty_rating")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  notes InterviewNote[]
+  preps InterviewPrep[]
+
+  @@index([opportunityId])
+  @@map("interviews")
+}
+
+/// One AI Interview Coach run for an Interview — new row per generation
+/// (never overwritten), same versioned-AI-output convention as
+/// `ApplicationStrategy`/`ApplicationReview`, so prep visibly improves as
+/// the user practices. Backed by `analyzeInterviewReadiness`
+/// (`career-intelligence/interview/interview-readiness/`, built in an
+/// earlier sprint but never wired to any UI until now) plus
+/// `analyzeAnswerFeedback` (new this sprint) for weak-answer detection on
+/// a specific practice answer.
+model InterviewPrep {
+  id          String    @id @default(uuid()) @db.Uuid
+  interviewId String    @map("interview_id") @db.Uuid
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  /// `{ question: string, category: string }[]` — the exact shape
+  /// `analyzeInterviewReadiness` (career-intelligence/interview/
+  /// interview-readiness/) already returns; category is free text the
+  /// model assigns (e.g. "technical", "behavioral", "gap-probing"), not a
+  /// fixed enum, since that service's existing contract is reused as-is
+  /// rather than modified for this sprint.
+  likelyQuestions        Json @map("likely_questions")
+  /// string[] — resume-backed STAR talking points.
+  starAnswerSuggestions  Json @map("star_answer_suggestions")
+  /// `{ question, answer, weaknesses: string[] }[]` — populated only once
+  /// the user submits a practice answer via `analyzeAnswerFeedback`;
+  /// empty array until then, never a guess at what the user might answer.
+  weakAnswerFlags        Json @default("[]") @map("weak_answer_flags")
+  improvementSuggestions Json @map("improvement_suggestions")
+  confidenceScore        Int  @map("confidence_score")
+  preparationChecklist   Json @map("preparation_checklist")
+
+  aiModel   String   @map("ai_model")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([interviewId])
+  @@map("interview_preps")
+}
+
+/// User-entered real offer terms — CareerOS has no way to know the actual
+/// terms of an offer beyond what the user tells it, so nothing here is
+/// AI-generated. One row per opportunity (updated in place if
+/// renegotiated, not versioned — these are facts about a live
+/// negotiation, not an AI analysis history). Location/remote/current
+/// status are deliberately not duplicated here — read from the parent
+/// `Opportunity` (`location`, `remote`, `status`) wherever needed.
+model Offer {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @unique @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  baseSalary    Int?      @map("base_salary")
+  bonus         Int?
+  equityDetails String?   @map("equity_details")
+  currency      String?
+  /// string[] — free-text benefits the user typed in, never inferred.
+  benefits      Json      @default("[]")
+  startDate     DateTime? @map("start_date")
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("offers")
+}
+
+/// One active career goal per user — same 1:1-per-user convention as
+/// `DiscoveryPreference`. Entirely user-entered; feeds Opportunity Score
+/// V2's career-goal-alignment factor and Career Health's growth-readiness
+/// factor.
+model CareerGoal {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @unique @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  targetRole       String? @map("target_role")
+  targetCompanies  Json    @default("[]") @map("target_companies")
+  targetSalaryMin  Int?    @map("target_salary_min")
+  targetSalaryMax  Int?    @map("target_salary_max")
+  targetLocation   String? @map("target_location")
+  targetTimeline   String? @map("target_timeline")
+  remotePreference String? @map("remote_preference")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("career_goals")
+}
+
+enum LearningItemStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+/// User-tracked skill/course progress — always user-entered (title and
+/// status), even when the suggestion originally came from an AI skill-gap
+/// analysis; CareerOS never marks something "completed" on its own.
+model LearningItem {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  skillOrTopic String             @map("skill_or_topic")
+  status       LearningItemStatus @default(PLANNED)
+  sourceUrl    String?            @map("source_url")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("learning_items")
+}
+
+/// A persisted run of the Salary Intelligence AI service
+/// (`career-intelligence/salary/salary-estimation/`, extended this sprint
+/// with `marketComparison`/`costOfLivingAdjustment`/`growthProjection`) —
+/// new row per generation, same versioned convention as
+/// `ApplicationStrategy`. Previously this service's output was
+/// dashboard-card-ephemeral only; persisting it is what lets Career
+/// Health and the unified Career Timeline reference a real salary signal.
+model SalaryEstimate {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role              String
+  location          String
+  yearsOfExperience Int    @map("years_of_experience")
+
+  estimatedMin Int    @map("estimated_min")
+  estimatedMax Int    @map("estimated_max")
+  currency     String
+  percentile   String
+
+  marketComparison       String @map("market_comparison")
+  costOfLivingAdjustment String @map("cost_of_living_adjustment")
+  growthProjection       String @map("growth_projection")
+  factors                Json
+  negotiationTips        Json   @map("negotiation_tips")
+
+  aiModel   String   @map("ai_model")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("salary_estimates")
+}
+
+/// A versioned snapshot of the Career Health Engine's composite score —
+/// always code-computed from real, persisted sub-signals (never a number
+/// the AI reports directly, same discipline as `overallReadiness`
+/// elsewhere in this codebase). Each sub-score is nullable: honestly
+/// `null` when the underlying signal doesn't exist yet for this user
+/// (e.g. no resume uploaded → `resumeQuality` is null, not zero), never
+/// padded with a value nobody actually measured — see
+/// `features/dashboard/career-health.ts`'s original doc comment, which
+/// this model is the "future sprint" it anticipated.
+model CareerHealthScore {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  overallScore       Int  @map("overall_score")
+  interviewReadiness Int? @map("interview_readiness")
+  resumeQuality      Int? @map("resume_quality")
+  linkedinQuality    Int? @map("linkedin_quality")
+  skillReadiness     Int? @map("skill_readiness")
+  marketReadiness    Int? @map("market_readiness")
+  companyReadiness   Int? @map("company_readiness")
+  growthReadiness    Int? @map("growth_readiness")
+
+  /// One explanation string per non-null factor above, keyed the same way.
+  factorsExplanation Json @map("factors_explanation")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("career_health_scores")
 }

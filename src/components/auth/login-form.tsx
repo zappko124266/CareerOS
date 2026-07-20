@@ -40,6 +40,9 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
               name="email"
               type="email"
               autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
             />
             <FieldError

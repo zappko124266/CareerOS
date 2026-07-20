@@ -20,7 +20,10 @@ import {
   RESUME_PARSE_SYSTEM_PROMPT,
   RESUME_SCORE_SYSTEM_PROMPT,
 } from "@/features/resume/prompts";
-import { getOwnedResumeOrThrow } from "@/features/resume/queries";
+import {
+  getOwnedResumeOrThrow,
+  getOwnedResumeVersionOrThrow,
+} from "@/features/resume/queries";
 import {
   ResumeAnalysisResultSchema,
   ResumeDataSchema,
@@ -185,4 +188,66 @@ export async function deleteResume(
   const resume = await getOwnedResumeOrThrow(resumeId, userId);
   await deleteResumeFile(supabase, resume.storagePath);
   await prisma.resume.delete({ where: { id: resumeId } });
+}
+
+/**
+ * Resume Studio's auto-save — updates the live, editable content in place.
+ * Deliberately does *not* create a `ResumeVersion`; that's an explicit,
+ * user-triggered checkpoint (`createResumeVersion` below), not something
+ * that happens on every debounced keystroke-driven save.
+ */
+export async function saveResumeDraft(
+  resumeId: string,
+  userId: string,
+  data: unknown,
+): Promise<Resume> {
+  await getOwnedResumeOrThrow(resumeId, userId);
+  const parsed = ResumeDataSchema.parse(data);
+
+  return prisma.resume.update({
+    where: { id: resumeId },
+    data: { parsedData: parsed },
+  });
+}
+
+export async function createResumeVersion(
+  resumeId: string,
+  userId: string,
+  label: string,
+) {
+  const resume = await getOwnedResumeOrThrow(resumeId, userId);
+
+  if (!resume.parsedData) {
+    throw new ValidationError(
+      "This resume has no content yet to save as a version.",
+    );
+  }
+
+  return prisma.resumeVersion.create({
+    data: { resumeId, label, data: resume.parsedData },
+  });
+}
+
+/** Restores a saved version as the resume's live, editable content — the
+ * version row itself is untouched, so restoring never loses history. */
+export async function restoreResumeVersion(
+  resumeId: string,
+  userId: string,
+  versionId: string,
+): Promise<Resume> {
+  const version = await getOwnedResumeVersionOrThrow(
+    versionId,
+    resumeId,
+    userId,
+  );
+
+  // Re-validate against the current schema rather than trusting the
+  // stored snapshot blindly — also resolves the stored `Json` value to a
+  // concrete `ResumeData` object for Prisma's setter.
+  const data = ResumeDataSchema.parse(version.data);
+
+  return prisma.resume.update({
+    where: { id: resumeId },
+    data: { parsedData: data },
+  });
 }

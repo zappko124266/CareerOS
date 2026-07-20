@@ -1,5 +1,12 @@
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { defineConfig, env } from "prisma/config";
+
+// `dotenv/config`'s default import only loads `.env` — it does not know
+// about Next.js's `.env.local` convention. Load both explicitly, with
+// `.env.local` taking precedence (matching how Next.js itself layers env
+// files), so the CLI sees the same DATABASE_URL/DIRECT_URL the app does.
+loadEnv({ path: ".env" });
+loadEnv({ path: ".env.local", override: true });
 
 // The CLI (migrate, db push, studio) always connects directly — never
 // through Supabase's connection pooler — since Migrate needs advisory locks

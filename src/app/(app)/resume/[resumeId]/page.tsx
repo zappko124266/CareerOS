@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Wand2 } from "lucide-react";
 import { z } from "zod";
 
 import { AtsScorePanel } from "@/components/resume/ats-score-panel";
@@ -8,6 +10,7 @@ import { OptimizationSuggestionsList } from "@/components/resume/optimization-su
 import { RescoreForm } from "@/components/resume/rescore-form";
 import { ResumeContentPreview } from "@/components/resume/resume-content-preview";
 import { ResumeStatusBadge } from "@/components/resume/resume-status-badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getResumeWithAnalyses } from "@/features/resume/queries";
 import {
@@ -15,6 +18,7 @@ import {
   OptimizationSuggestionSchema,
   ResumeDataSchema,
 } from "@/features/resume/schema";
+import { computeActionVerbUsage, computeReadability } from "@/features/resume/seo";
 import { verifySession } from "@/lib/auth/dal";
 
 export const metadata: Metadata = { title: "Resume" };
@@ -38,18 +42,24 @@ export default async function ResumeDetailPage({
   const parsedContent = resume.parsedData
     ? ResumeDataSchema.safeParse(resume.parsedData)
     : null;
+  const actionVerbUsage = parsedContent?.success
+    ? computeActionVerbUsage(parsedContent.data)
+    : { score: 0, totalBullets: 0, weakBullets: [] };
+  const readability = parsedContent?.success
+    ? computeReadability(parsedContent.data)
+    : { score: 0, averageWordsPerBullet: 0 };
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-break-word">
               {resume.title}
             </h1>
             <ResumeStatusBadge status={resume.status} />
           </div>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-sm wrap-break-word">
             {resume.originalFilename}
           </p>
         </div>
@@ -73,6 +83,27 @@ export default async function ResumeDetailPage({
 
       {resume.status === "PARSED" && (
         <>
+          <Card className="bg-foreground text-background">
+            <CardContent className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="font-semibold">Resume Studio</p>
+                <p className="text-background/70 text-sm">
+                  Edit, tailor to a job, compare versions, and export as PDF or DOCX.
+                </p>
+              </div>
+              <Button
+                asChild
+                variant="secondary"
+                className="bg-background text-foreground hover:bg-background/90 w-full sm:w-auto"
+              >
+                <Link href={`/resume/${resume.id}/studio`}>
+                  <Wand2 />
+                  Open Resume Studio
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>ATS analysis</CardTitle>
@@ -84,6 +115,8 @@ export default async function ResumeDetailPage({
                   breakdown={AtsScoreBreakdownSchema.parse(
                     latestAnalysis.breakdown,
                   )}
+                  actionVerbUsage={actionVerbUsage}
+                  readability={readability}
                 />
               ) : (
                 <p className="text-muted-foreground text-sm">
