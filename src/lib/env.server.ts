@@ -29,16 +29,12 @@ const serverEnvSchema = z.object({
   // RLS-bypassing operations like the auth webhook/admin actions).
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
-  // Vercel AI Gateway — see src/lib/ai/client.ts. All LLM calls route
-  // through the Gateway so swapping providers/models is a string change.
-  AI_GATEWAY_API_KEY: z.string().min(1),
-
-  // AI Router — see src/lib/ai/router.ts. A separate, direct-provider
-  // routing layer alongside the Gateway-based client above (not a
-  // replacement for it — existing callers of src/lib/ai/client.ts are
-  // unaffected). All fields are optional so environments that don't use
-  // the router keep working unchanged; router.ts throws a typed error at
-  // call time if AI_PROVIDER or the selected provider's key is missing.
+  // AI Router — see src/lib/ai/router.ts. The only AI system in this app;
+  // every feature calls generateText/generateObject/streamText from
+  // "@/lib/ai", which resolves to whichever provider AI_PROVIDER selects.
+  // All fields are optional at the schema level so `next build`/module
+  // load never fails on their own — router.ts throws a typed error at call
+  // time if AI_PROVIDER or the selected provider's key is missing.
   AI_PROVIDER: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.enum(["nvidia", "groq", "gemini", "openrouter"]).optional(),

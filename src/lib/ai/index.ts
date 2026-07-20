@@ -19,20 +19,14 @@ import {
 } from "@/lib/ai/types";
 
 /**
- * Enterprise AI Router — public entry point.
+ * AI Router — public entry point, and the only way any feature talks to an
+ * LLM in this app.
  *
  * `generateText` / `generateObject` / `streamText` are the only functions
  * business logic should call. Which provider actually serves the request
  * is controlled entirely by `AI_PROVIDER` (see `router.ts`); callers never
  * import a provider module directly, so adding, removing, or swapping a
  * provider never touches this file or its callers.
- *
- * This is a separate system from `src/lib/ai/client.ts` (the existing
- * Vercel AI Gateway–based helpers the Resume pipeline uses) — that module
- * is untouched and keeps working exactly as before. Use this router for
- * new features that need direct control over which provider serves a
- * request (cost, latency, or data-residency reasons); use `client.ts` where
- * gateway-managed routing is preferable.
  */
 
 export * from "@/lib/ai/types";

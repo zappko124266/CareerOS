@@ -29,10 +29,8 @@ model are decided — never build it as a fully autonomous submit.
   driver adapter.
 - **Supabase Auth** (`@supabase/ssr`) for authentication/session management,
   **Supabase Storage** for user file uploads (resumes).
-- **Vercel AI SDK** (`ai`) for all LLM calls, through two parallel systems —
-  the Gateway-based `src/lib/ai/client.ts` (see "AI provider abstraction")
-  and the direct-provider `src/lib/ai/router.ts` (see "AI Router") — both
-  described below.
+- **Vercel AI SDK** (`ai`) for all LLM calls, through a single direct-provider
+  system — the AI Router (`src/lib/ai/router.ts`, see "AI Router" below).
 
 ## Folder structure
 
@@ -68,9 +66,7 @@ src/
     supabase/         # client.ts (browser), server.ts (RSC/actions), session.ts (Proxy), admin.ts
     storage/          # Supabase Storage helpers, one file per bucket
     files/            # File-format utilities (PDF/DOCX text extraction)
-    ai/               # Two parallel LLM systems — see "AI provider abstraction" and "AI Router" below
-      client.ts       # Gateway-based helpers (generateStructured, generatePlainText) — used by Resume pipeline
-      models.ts       # Gateway model id constants
+    ai/               # The AI Router — see "AI Router" below
       types.ts        # AI Router: provider interface, typed errors, option/result types
       router.ts       # AI Router: AI_PROVIDER → provider registry/resolution
       index.ts        # AI Router: public generateText/generateObject/streamText API
@@ -120,42 +116,12 @@ registry pattern mirroring the AI Router (`src/lib/ai/router.ts`), so a new
 external data source is one new adapter file, not a change to business
 logic.
 
-## AI provider abstraction (Gateway-based — `client.ts`)
-
-Used today by the Resume pipeline. All calls go through
-`src/lib/ai/client.ts` — feature code never imports the `ai` package
-directly. This is a thin facade over the Vercel AI SDK + AI Gateway
-(`AI_GATEWAY_API_KEY`):
-
-```ts
-import { generateStructured } from "@/lib/ai/client";
-
-const data = await generateStructured({
-  schema: SomeZodSchema,
-  system: "...",
-  prompt: "...",
-});
-```
-
-Internally this calls `generateText({ model, output: Output.object({ schema }) })`
-(the AI SDK deprecated the standalone `generateObject` function — verify
-against `node_modules/ai/docs` before assuming otherwise, this SDK moves
-fast). Because the Gateway resolves plain `"provider/model"` strings
-(`src/lib/ai/models.ts`), **swapping providers is a string change**, not new
-adapter code — that's what makes this an abstraction rather than a thin
-Anthropic-specific wrapper. Always verify a model ID against
-`https://ai-gateway.vercel.sh/v1/models` before using it; never trust a
-remembered ID.
-
-This module is untouched by, and independent of, the AI Router below —
-existing callers keep working exactly as before.
-
 ## AI Router (multi-provider — `router.ts` / `index.ts`)
 
-A second, parallel LLM system for features that need direct control over
-_which provider_ serves a request (cost, latency, rate limits, or
-data-residency reasons) rather than delegating that choice to the Gateway.
-Business logic imports only from `src/lib/ai` (the `index.ts` barrel):
+The only LLM system in this app — every feature calls it for direct control
+over _which provider_ serves a request (cost, latency, rate limits, or
+data-residency reasons). Business logic imports only from `src/lib/ai` (the
+`index.ts` barrel):
 
 ```ts
 import { generateText, generateObject, streamText } from "@/lib/ai";
@@ -189,7 +155,7 @@ providers: it's the same underlying AI SDK call in every case, only the
 2. Add `<name>` to `AI_PROVIDER_IDS` in `types.ts`.
 3. Register it in `PROVIDER_REGISTRY` in `router.ts`.
 
-**Current providers** (all via their AI SDK package, not the Gateway):
+**Current providers** (each via its own direct AI SDK package):
 
 | Provider     | Package                                                                                | Default model                 |
 | ------------ | -------------------------------------------------------------------------------------- | ----------------------------- |
@@ -474,15 +440,10 @@ later.
 **Note on `analyzeResumeAts`**: the resume detail page's ATS score card
 (`## Resume pipeline` above) does **not** call this service — it calls
 `scoreResume` in `src/features/resume/service.ts`, a separate, older
-pipeline built directly on the Gateway client (`src/lib/ai/client.ts`)
-rather than the AI Router. This is a pre-existing inconsistency, not
-something this sprint introduced or fixed: `scoreResume` was shipped before
-the AI Router existed, and changing its transport is a behavior-risking
-change to an already-shipped, load-bearing flow with no sprint requirement
-forcing it. Every *new* AI capability added in Resume Studio (tailoring,
-keyword/strength/weakness analysis) goes through the AI Router as required.
-Unifying `scoreResume` onto the AI Router is flagged here as a known
-follow-up, not silently left undocumented.
+pipeline. `scoreResume` (and `parseResume`) originally ran on a since-removed
+Gateway-based client and have been migrated onto the AI Router
+(`generateObject` from `@/lib/ai`), same as every other AI call in the app —
+there is now exactly one LLM transport, not two.
 
 ## Resume Studio
 

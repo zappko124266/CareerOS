@@ -1,8 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { generateStructured } from "@/lib/ai/client";
-import { DEFAULT_MODEL } from "@/lib/ai/models";
+import { generateObject } from "@/lib/ai";
 import { ValidationError } from "@/lib/errors";
 import { extractResumeText } from "@/lib/files/extract-text";
 import { logger } from "@/lib/logger";
@@ -113,7 +112,7 @@ export async function parseResume(
 
     const rawText = await extractResumeText(buffer, resume.mimeType);
 
-    const parsedData = await generateStructured({
+    const parsed = await generateObject({
       schema: ResumeDataSchema,
       system: RESUME_PARSE_SYSTEM_PROMPT,
       prompt: buildResumeParsePrompt(rawText),
@@ -123,9 +122,9 @@ export async function parseResume(
       where: { id: resumeId },
       data: {
         rawText,
-        parsedData,
+        parsedData: parsed.object,
         status: "PARSED",
-        aiModel: DEFAULT_MODEL,
+        aiModel: parsed.model,
         failureReason: null,
       },
     });
@@ -155,7 +154,7 @@ export async function scoreResume(
     );
   }
 
-  const result = await generateStructured({
+  const result = await generateObject({
     schema: ResumeAnalysisResultSchema,
     system: RESUME_SCORE_SYSTEM_PROMPT,
     prompt: buildResumeScorePrompt({
@@ -165,17 +164,19 @@ export async function scoreResume(
   });
 
   const overallScore = Math.round(
-    Object.values(result.breakdown).reduce((sum, value) => sum + value, 0) /
-      Object.values(result.breakdown).length,
+    Object.values(result.object.breakdown).reduce(
+      (sum, value) => sum + value,
+      0,
+    ) / Object.values(result.object.breakdown).length,
   );
 
   return prisma.resumeAnalysis.create({
     data: {
       resumeId,
       overallScore,
-      breakdown: result.breakdown,
-      suggestions: result.suggestions,
-      aiModel: DEFAULT_MODEL,
+      breakdown: result.object.breakdown,
+      suggestions: result.object.suggestions,
+      aiModel: result.model,
     },
   });
 }
