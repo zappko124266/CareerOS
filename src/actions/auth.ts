@@ -83,6 +83,9 @@ export async function signUpAction(
     },
   });
 
+  console.log("SIGNUP DATA", data);
+  console.log("SIGNUP ERROR", error);
+
   if (error) {
     return { status: "error", message: error.message };
   }

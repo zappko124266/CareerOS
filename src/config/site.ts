@@ -1,10 +1,12 @@
 import { Briefcase, FileText, IdCard, LayoutDashboard } from "lucide-react";
 
+import { clientEnv } from "@/lib/env.client";
+
 export const siteConfig = {
   name: "CareerOS",
   description:
     "CareerOS is the operating system for managing your career — track goals, opportunities, and growth in one place.",
-  url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+  url: clientEnv.NEXT_PUBLIC_APP_URL,
 } as const;
 
 export const mainNav = [
