@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { ApplicationWorkspace } from "@/components/opportunities/application-workspace";
-import { computeMatch } from "@/features/opportunities/match";
+import { getDiscoveryPreference } from "@/features/discovery/queries";
+import { buildOpportunityIntelligence, type OpportunityIntelligenceContext } from "@/features/opportunities/intelligence";
+import { computeOpportunityScoreV2 } from "@/features/opportunities/score";
 import { getResumeMatchProfile } from "@/features/opportunities/service";
 import { getOpportunityWithNotes } from "@/features/opportunities/queries";
 import { OpportunitySkillsSchema } from "@/features/opportunities/schema";
@@ -66,6 +68,8 @@ export default async function OpportunityWorkspacePage({
     recruiters,
     offer,
     latestGapAssessment,
+    opportunityScore,
+    discoveryPreference,
   ] = await Promise.all([
     getResumeMatchProfile(user.id),
     listResumesForUser(user.id),
@@ -80,17 +84,27 @@ export default async function OpportunityWorkspacePage({
     listRecruitersForUser(user.id),
     getOfferForOpportunity(opportunityId),
     getLatestExperienceGapAssessment(opportunityId, user.id),
+    computeOpportunityScoreV2(opportunityId, user.id),
+    getDiscoveryPreference(user.id),
   ]);
 
   const skills = OpportunitySkillsSchema.safeParse(opportunity.skills);
-  const match = computeMatch(
+  const intelligenceContext: OpportunityIntelligenceContext = {
+    dreamCompanyNames: new Set(
+      ((discoveryPreference?.preferredCompanies as string[]) ?? []).map((name) => name.toLowerCase()),
+    ),
+    urgency: (discoveryPreference?.availability as OpportunityIntelligenceContext["urgency"]) ?? null,
+  };
+  const intelligence = buildOpportunityIntelligence(
     {
       title: opportunity.title,
       location: opportunity.location,
       remote: opportunity.remote,
       skills: skills.success ? skills.data : [],
+      companyName: opportunity.companyName,
     },
     resumeProfile,
+    intelligenceContext,
   );
 
   const resumeList = resumes.map((resume) => ({ id: resume.id, title: resume.title }));
@@ -105,7 +119,8 @@ export default async function OpportunityWorkspacePage({
   return (
     <ApplicationWorkspace
       opportunity={opportunity}
-      match={match}
+      intelligence={intelligence}
+      opportunityScore={opportunityScore}
       resumes={resumeList}
       selectedResume={selectedResume}
       applicationDocuments={applicationDocuments}

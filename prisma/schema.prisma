@@ -824,6 +824,43 @@ model DiscoveryPreference {
   joiningTimeline         String?  @map("joining_timeline")
   languages               Json     @default("[]")
 
+  /// Onboarding wizard fields (Career Onboarding sprint) — collected once
+  /// up front so every feature that already reads this row (Job Ranking,
+  /// Discovery matching, Career Health) gets real signal from day one,
+  /// instead of duplicating a parallel "profile preferences" table.
+  yearsOfExperience Int?    @map("years_of_experience")
+  /// Json string[] — same "no canonical taxonomy, always read/written as a
+  /// whole" convention as `preferredRoles`/`keywords` above.
+  skills            Json    @default("[]")
+  /// Free text (e.g. "Bachelor's in Computer Science") — same rationale as
+  /// `preferredCompanySize`: no canonical degree-level taxonomy exists
+  /// anywhere in this codebase, so this isn't a fabricated enum.
+  educationLevel    String? @map("education_level")
+  /// Json string[] of `OpportunityType` values (`src/features/opportunities/schema.ts`)
+  /// — reuses that existing enum's vocabulary instead of inventing a
+  /// separate "employment type" taxonomy.
+  employmentTypes   Json    @default("[]") @map("employment_types")
+
+  /// Sprint 1.5 (Personalization) — genuinely new concepts only. "Dream
+  /// companies" reuses `preferredCompanies` above (same thing, don't
+  /// duplicate); "job search urgency" reuses `availability` above (already
+  /// exactly this concept). Only these two had no existing home:
+  /// Json string[] from a small fixed set (`SearchPrioritySchema` in
+  /// `src/features/discovery/schema.ts`) — what the user cares about most
+  /// when weighing an opportunity.
+  searchPriorities   Json @default("[]") @map("search_priorities")
+  /// Json string[], free text (e.g. "LinkedIn", "Indeed") — no canonical
+  /// list of every job portal exists, same free-text convention as
+  /// `skills`/`preferredRoles` above.
+  existingJobPortals Json @default("[]") @map("existing_job_portals")
+
+  /// Onboarding wizard progress — real, code-checked state (furthest step
+  /// reached, completion timestamp), not re-derived from unrelated rows
+  /// the way the older `getOnboardingStatus` checklist is. `null`
+  /// `onboardingCompletedAt` means the wizard hasn't been finished yet.
+  onboardingStep        Int       @default(0) @map("onboarding_step")
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 

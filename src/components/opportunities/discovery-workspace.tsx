@@ -65,12 +65,17 @@ function ResultsSkeleton() {
 export function DiscoveryWorkspace({
   providers,
   initialSavedSourceIds,
+  initialFilters = DEFAULT_FILTERS,
 }: {
   providers: ProviderAvailability[];
   initialSavedSourceIds: string[];
+  /** Sprint 1.5 (Personalization) — seeded from the user's own onboarding
+   * answers (`DiscoveryPreference`) by the page; defaults to the plain
+   * `{ page: 1 }` search when nothing's been set, same as before. */
+  initialFilters?: OpportunitySearchInput;
 }) {
   const configuredProviders = providers.filter((provider) => provider.configured);
-  const [filters, setFilters] = useState<OpportunitySearchInput>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<OpportunitySearchInput>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [savedKeys, setSavedKeys] = useState(new Set(initialSavedSourceIds));
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -78,7 +83,7 @@ export function DiscoveryWorkspace({
 
   useEffect(() => {
     if (configuredProviders.length > 0) {
-      search.run(DEFAULT_FILTERS);
+      search.run(initialFilters);
     }
     // Auto-run once on mount only — subsequent searches are user-triggered.
     // eslint-disable-next-line react-hooks/exhaustive-deps

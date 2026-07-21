@@ -19,8 +19,6 @@ import {
   updateOpportunityStatus,
   type SearchOpportunitiesResult,
 } from "@/features/opportunities/service";
-import { computeOpportunityScoreV2 } from "@/features/opportunities/score";
-import type { OpportunityScoreV2Factors } from "@/features/discovery/types";
 import {
   OpportunitySearchInputSchema,
   SaveOpportunityInputSchema,
@@ -195,23 +193,6 @@ export async function getOpportunityMatchAnalysisAction(
     resumeText: resume.rawText,
     jobDescription: jobDescription.trim(),
   });
-}
-
-/** Module 12 — Career Opportunity Score V2 for one saved opportunity. No
- * AI call of its own beyond whatever's already cached (Discovery's
- * original ranking, Company Research) — purely code-computed, so no
- * entitlement gate is needed. */
-export async function getOpportunityScoreV2Action(
-  opportunityId: string,
-): Promise<DataActionResult<{ factors: OpportunityScoreV2Factors; overallScore: number }>> {
-  const user = await verifySession();
-
-  try {
-    const result = await computeOpportunityScoreV2(opportunityId, user.id);
-    return { status: "success", data: result };
-  } catch (error) {
-    return toActionError(error, "We couldn't compute this opportunity's score.");
-  }
 }
 
 /** Shape the Discovery page's Server Component passes down as a prop

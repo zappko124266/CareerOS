@@ -1,96 +1,55 @@
 import type { Metadata } from "next";
 
-import { AiRecommendationsCard } from "@/components/dashboard/ai-recommendations-card";
-import { ApplicationsSummaryCard } from "@/components/dashboard/applications-summary-card";
 import { CareerHealthCard } from "@/components/dashboard/career-health-card";
+import { CareerSnapshotCard } from "@/components/dashboard/career-snapshot-card";
 import { CopilotPanel } from "@/components/dashboard/copilot-panel";
-import { InterviewReadinessCard } from "@/components/dashboard/interview-readiness-card";
-import { JobMatchCard } from "@/components/dashboard/job-match-card";
-import { LinkedInScoreCard } from "@/components/dashboard/linkedin-score-card";
-import { OnboardingCard } from "@/components/dashboard/onboarding-card";
-import { ProfileOptimizationCard } from "@/components/dashboard/profile-optimization-card";
-import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentActivityFeed } from "@/components/dashboard/recent-activity-feed";
-import { ResumeScoreCard } from "@/components/dashboard/resume-score-card";
-import { SalaryInsightsCard } from "@/components/dashboard/salary-insights-card";
-import { SkillsProgressCard } from "@/components/dashboard/skills-progress-card";
-import { computeApplicationAnalytics } from "@/features/analytics/service";
 import { buildBriefing } from "@/features/dashboard/briefing";
-import { getDashboardData, getSalaryPrefill } from "@/features/dashboard/queries";
+import { getDashboardData } from "@/features/dashboard/queries";
 import { computeCareerHealthV2 } from "@/features/career/health";
-import { getLatestInterviewPrepForUser } from "@/features/interviews/queries";
-import { getLatestLinkedInAnalysis, getLinkedInProfile } from "@/features/linkedin-profile/queries";
-import { getOnboardingStatus } from "@/features/onboarding/service";
-import { generateProfileInsights } from "@/features/profile-optimization/insights";
-import { getProfileOptimizationSummary } from "@/features/profile-optimization/service";
+import { getCoachContext } from "@/features/coach/context";
+import { getCareerRoadmap } from "@/features/coach/roadmap";
 import { verifySession } from "@/lib/auth/dal";
 
-export const metadata: Metadata = { title: "Dashboard" };
+export const metadata: Metadata = { title: "Home" };
 
+/**
+ * Simplified Home dashboard — Welcome back + next recommended action
+ * (CopilotPanel), Career Snapshot (Sprint 1.5: Current Goal/Focus/
+ * Location/Progress, reusing the Coach Context/Roadmap Engines wholesale
+ * — no new query), Recent activity, and Career progress. The technical
+ * widgets this used to show (Profile Optimization, Resume/LinkedIn
+ * scores, Job Match, Salary, Skills, Applications summary, Interview
+ * readiness, AI Recommendations, Onboarding, Quick Actions) are still
+ * fully built and reachable from AI Coach / Resume / Jobs / Applications
+ * — this page just stops surfacing all of them at once.
+ */
 export default async function DashboardPage() {
   const user = await verifySession();
-  const [
-    data,
-    analytics,
-    health,
-    latestPrep,
-    linkedInProfile,
-    latestLinkedInAnalysis,
-    profileOptimizationSummary,
-    profileInsights,
-    onboardingStatus,
-  ] = await Promise.all([
+  const [data, health, coachContext] = await Promise.all([
     getDashboardData(user.id),
-    computeApplicationAnalytics(user.id),
     computeCareerHealthV2(user.id).catch(() => null),
-    getLatestInterviewPrepForUser(user.id),
-    getLinkedInProfile(user.id),
-    getLatestLinkedInAnalysis(user.id),
-    getProfileOptimizationSummary(user.id),
-    generateProfileInsights(user.id),
-    getOnboardingStatus(user.id),
+    getCoachContext(user),
   ]);
 
-  const briefing = buildBriefing(data.resumeCount, data.latestAnalysis);
-  const salaryPrefill = getSalaryPrefill(data.latestResume);
+  const briefing = buildBriefing(
+    data.resumeCount,
+    data.latestAnalysis,
+    coachContext.onboarding.targetRole,
+    coachContext.onboarding.urgency,
+  );
+  const roadmap = getCareerRoadmap(coachContext);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
-      <OnboardingCard status={onboardingStatus} />
       <CopilotPanel name={user.fullName ?? ""} briefing={briefing} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <ProfileOptimizationCard summary={profileOptimizationSummary} insights={profileInsights} />
-        <CareerHealthCard health={health} />
-        <ResumeScoreCard
-          resumeId={data.latestResume?.id ?? null}
-          latestAnalysis={data.latestAnalysis}
-          historyCount={data.analysisHistory.length}
-        />
-        <LinkedInScoreCard hasProfile={Boolean(linkedInProfile)} latestAnalysis={latestLinkedInAnalysis} />
-        <JobMatchCard />
-        <SalaryInsightsCard prefill={salaryPrefill} />
-        <SkillsProgressCard />
-        <ApplicationsSummaryCard analytics={analytics} />
-        <InterviewReadinessCard
-          latest={
-            latestPrep
-              ? {
-                  confidenceScore: latestPrep.confidenceScore,
-                  opportunityId: latestPrep.interview.opportunity.id,
-                  roleTitle: latestPrep.interview.opportunity.title,
-                  companyName: latestPrep.interview.opportunity.companyName,
-                }
-              : null
-          }
-        />
-        <AiRecommendationsCard hasResume={data.resumeCount > 0} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <CareerSnapshotCard onboarding={coachContext.onboarding} roadmap={roadmap} />
+        <RecentActivityFeed items={data.recentActivity} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <RecentActivityFeed items={data.recentActivity} />
-        <QuickActions />
-      </div>
+      <CareerHealthCard health={health} />
     </div>
   );
 }

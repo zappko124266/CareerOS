@@ -1,4 +1,5 @@
 import { DIMENSION_LABEL } from "@/components/resume/ats-score-panel";
+import type { AvailabilityWindow } from "@/features/discovery/types";
 import { AtsScoreBreakdownSchema } from "@/features/resume/schema";
 import type { ResumeAnalysis } from "@/generated/prisma/client";
 
@@ -17,19 +18,26 @@ export interface Briefing {
 
 /**
  * The AI Copilot's daily briefing — entirely derived from real, persisted
- * data (resume count, latest ATS score + breakdown). No AI call happens
- * just to render the dashboard; the deeper AI Recommendations card is
- * where the user opts into an actual model call.
+ * data (resume count, latest ATS score + breakdown, plus the user's own
+ * onboarding answer for their target role, if they've given one). No AI
+ * call happens just to render the dashboard; the deeper AI Recommendations
+ * card is where the user opts into an actual model call.
  */
 export function buildBriefing(
   resumeCount: number,
   latestAnalysis: ResumeAnalysis | null,
+  targetRole?: string | null,
+  urgency?: AvailabilityWindow | null,
 ): Briefing {
   if (resumeCount === 0) {
     return {
-      headline: "Let's give your AI agent something to work with.",
-      detail:
-        "Upload your resume and CareerOS will score it against ATS systems in seconds, then guide you through the rest of your job search.",
+      headline:
+        urgency === "IMMEDIATE"
+          ? "Let's move fast — starting with your resume."
+          : "Let's give your AI agent something to work with.",
+      detail: targetRole
+        ? `Upload your resume and CareerOS will score it against ATS systems in seconds, then guide you toward that ${targetRole} role.`
+        : "Upload your resume and CareerOS will score it against ATS systems in seconds, then guide you through the rest of your job search.",
       actions: [
         {
           id: "upload-resume",
@@ -75,7 +83,9 @@ export function buildBriefing(
   return {
     headline:
       scoreTone === "strong"
-        ? "Your resume is in strong shape."
+        ? targetRole
+          ? `Your resume is in strong shape for ${targetRole} roles.`
+          : "Your resume is in strong shape."
         : scoreTone === "solid"
           ? "Your resume is solid — a few fixes could push it higher."
           : "Your resume needs some attention before you start applying.",

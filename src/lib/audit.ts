@@ -66,7 +66,8 @@ export type AuditAction =
   | "linkedin_profile.updated"
   | "linkedin_analysis.generated"
   | "linkedin_profile.version_created"
-  | "linkedin_profile.version_restored";
+  | "linkedin_profile.version_restored"
+  | "onboarding.completed";
 
 /**
  * Appends a row to `audit_logs`. Call this from Server Actions and Route

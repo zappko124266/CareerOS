@@ -1,4 +1,11 @@
-import { Briefcase, FileText, IdCard, LayoutDashboard } from "lucide-react";
+import {
+  Briefcase,
+  FileText,
+  Home,
+  ListChecks,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 
 import { clientEnv } from "@/lib/env.client";
 
@@ -9,11 +16,18 @@ export const siteConfig = {
   url: clientEnv.NEXT_PUBLIC_APP_URL,
 } as const;
 
+// Primary navigation — the AI Coach experience, not the old feature list.
+// Advanced/secondary pages (LinkedIn, AI Job Discovery, Analytics, Account
+// Connections, Recruiters) are intentionally not top-level nav items
+// anymore; they're still fully reachable from the AI Coach cards and from
+// links within Resume/Jobs/Applications themselves — nothing was deleted.
 export const mainNav = [
-  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { title: "Resumes", href: "/resume", icon: FileText },
-  { title: "LinkedIn", href: "/linkedin", icon: IdCard },
-  { title: "Opportunities", href: "/opportunities", icon: Briefcase },
+  { title: "Home", href: "/dashboard", icon: Home },
+  { title: "AI Coach", href: "/coach", icon: Sparkles },
+  { title: "Resume", href: "/resume", icon: FileText },
+  { title: "Jobs", href: "/opportunities", icon: Briefcase },
+  { title: "Applications", href: "/applications", icon: ListChecks },
+  { title: "Settings", href: "/settings", icon: Settings },
 ] as const;
 
 export const landingNav = [

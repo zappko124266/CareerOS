@@ -113,6 +113,22 @@ export const PROVIDER_TO_DB_SOURCE = {
   reed: "REED",
 } as const satisfies Record<OpportunitySource, string>;
 
+/** Sprint 2 (Opportunity Intelligence) — the single shared vocabulary for
+ * "how good a fit is this," used both by the AI-powered Job Match
+ * Analysis (`JobMatchAnalysisOutputSchema.recommendation`, which already
+ * used these exact 4 literals) and by the deterministic Opportunity
+ * Intelligence Engine's tier classification (`features/opportunities/intelligence.ts`).
+ * One label map, not two copies (previously duplicated verbatim in
+ * `match-panel.tsx` and `job-match-card.tsx`). */
+export const RECOMMENDATION_TIERS = ["strong_match", "good_match", "stretch", "not_a_match"] as const;
+export type RecommendationTier = (typeof RECOMMENDATION_TIERS)[number];
+export const RECOMMENDATION_TIER_LABEL: Record<RecommendationTier, string> = {
+  strong_match: "Strong match",
+  good_match: "Good match",
+  stretch: "Stretch",
+  not_a_match: "Not a match",
+};
+
 /** The inverse of `PROVIDER_TO_DB_SOURCE` — needed wherever code starts
  * from a `Prisma.OpportunitySource` value already (e.g. `DiscoveredListing.source`)
  * and has to call back into `saveOpportunity`, which takes the lowercase

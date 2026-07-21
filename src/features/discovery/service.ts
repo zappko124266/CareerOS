@@ -53,6 +53,16 @@ export async function upsertDiscoveryPreference(
     shiftPreference: input.shiftPreference,
     joiningTimeline: input.joiningTimeline,
     languages: input.languages,
+    // Onboarding wizard fields — passed through as-is (not coalesced to a
+    // default) so Prisma's "skip undefined keys on update" behavior lets
+    // this same upsert stay safe for callers (like the Discovery
+    // Preferences panel) that don't know about these fields at all.
+    yearsOfExperience: input.yearsOfExperience,
+    skills: input.skills,
+    educationLevel: input.educationLevel,
+    employmentTypes: input.employmentTypes,
+    searchPriorities: input.searchPriorities,
+    existingJobPortals: input.existingJobPortals,
   };
 
   return prisma.discoveryPreference.upsert({

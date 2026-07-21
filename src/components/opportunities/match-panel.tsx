@@ -5,42 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { ScoreRing } from "@/components/dashboard/score-ring";
+import { CategorizedRequirementList } from "@/components/opportunities/categorized-requirement-list";
 import type { MatchBreakdown } from "@/features/opportunities/match";
-import { categorizeRequirements } from "@/features/opportunities/requirement-categories";
+import { RECOMMENDATION_TIER_LABEL } from "@/features/opportunities/types";
 import type { JobMatchAnalysisOutput } from "@/features/career-intelligence/jobs/job-match-analysis/types";
-
-function CategorizedRequirementList({ requirements }: { requirements: string[] }) {
-  const { skills, tools, certifications } = categorizeRequirements(requirements);
-  const groups: { label: string; items: string[] }[] = [
-    { label: "Missing skills", items: skills },
-    { label: "Missing tools", items: tools },
-    { label: "Missing certifications", items: certifications },
-  ].filter((group) => group.items.length > 0);
-
-  return (
-    <div className="flex flex-col gap-2">
-      {groups.map((group) => (
-        <div key={group.label}>
-          <p className="text-sm font-medium">{group.label}</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {group.items.map((item) => (
-              <Badge key={item} variant="outline">
-                {item}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const RECOMMENDATION_LABEL = {
-  strong_match: "Strong match",
-  good_match: "Good match",
-  stretch: "Stretch",
-  not_a_match: "Not a match",
-} as const;
 
 export function MatchPanel({
   deterministic,
@@ -134,7 +102,7 @@ export function MatchPanel({
               <div className="flex items-center gap-4">
                 <ScoreRing score={aiResult.matchScore} label="AI match score" />
                 <div>
-                  <Badge>{RECOMMENDATION_LABEL[aiResult.recommendation]}</Badge>
+                  <Badge>{RECOMMENDATION_TIER_LABEL[aiResult.recommendation]}</Badge>
                   <p className="text-muted-foreground mt-1.5 text-sm">
                     {aiResult.summary}
                   </p>

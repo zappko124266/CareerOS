@@ -23,7 +23,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAsyncAction } from "@/hooks/use-async-action";
-import type { MatchBreakdown } from "@/features/opportunities/match";
+import type { OpportunityIntelligence } from "@/features/opportunities/intelligence";
+import type { OpportunityScoreV2Factors } from "@/features/discovery/types";
 import { STATUS_LABEL, STATUS_OFF_PATH, STATUS_ORDER } from "@/features/opportunities/types";
 import type {
   Checklist,
@@ -54,6 +55,7 @@ import { ApplicationPackagePanel } from "./application-package-panel";
 import { ApplicationStudio } from "./application-studio/application-studio";
 import { CareerGapPanel } from "./career-gap-panel";
 import { MatchPanel } from "./match-panel";
+import { OpportunityIntelligenceSummary } from "./opportunity-intelligence-summary";
 import { OpportunityScoreCard } from "./opportunity-score-card";
 import { ChecklistEditor } from "./checklist-editor";
 import { CustomQuestionsEditor } from "./custom-questions-editor";
@@ -77,7 +79,8 @@ function formatSalary(opportunity: Opportunity) {
 
 export function ApplicationWorkspace({
   opportunity: initialOpportunity,
-  match,
+  intelligence,
+  opportunityScore,
   resumes,
   selectedResume,
   applicationDocuments,
@@ -96,7 +99,8 @@ export function ApplicationWorkspace({
   latestGapAssessment,
 }: {
   opportunity: OpportunityWithNotes;
-  match: MatchBreakdown;
+  intelligence: OpportunityIntelligence;
+  opportunityScore: { factors: OpportunityScoreV2Factors; overallScore: number };
   resumes: { id: string; title: string }[];
   selectedResume: { id: string; title: string } | null;
   applicationDocuments: ApplicationDocument[];
@@ -250,6 +254,8 @@ export function ApplicationWorkspace({
         </CardContent>
       </Card>
 
+      <OpportunityIntelligenceSummary intelligence={intelligence} aiResult={aiMatch.result} />
+
       <Tabs defaultValue="overview">
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -292,13 +298,16 @@ export function ApplicationWorkspace({
             </CardContent>
           </Card>
 
-          <OpportunityScoreCard opportunityId={opportunity.id} />
+          <OpportunityScoreCard
+            factors={opportunityScore.factors}
+            overallScore={opportunityScore.overallScore}
+          />
           <CareerGapPanel opportunityId={opportunity.id} latestAssessment={latestGapAssessment} />
         </TabsContent>
 
         <TabsContent value="match">
           <MatchPanel
-            deterministic={match}
+            deterministic={intelligence.match}
             aiResult={aiMatch.result}
             aiError={aiMatch.error}
             aiPending={aiMatch.isPending}

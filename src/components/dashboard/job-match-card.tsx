@@ -21,13 +21,7 @@ import { Label } from "@/components/ui/label";
 import { ScoreRing } from "@/components/dashboard/score-ring";
 import { Textarea } from "@/components/ui/textarea";
 import { useAsyncAction } from "@/hooks/use-async-action";
-
-const RECOMMENDATION_LABEL = {
-  strong_match: "Strong match",
-  good_match: "Good match",
-  stretch: "Stretch",
-  not_a_match: "Not a match",
-} as const;
+import { RECOMMENDATION_TIER_LABEL } from "@/features/opportunities/types";
 
 export function JobMatchCard() {
   const [open, setOpen] = useState(false);
@@ -107,7 +101,7 @@ export function JobMatchCard() {
             <div className="flex items-center gap-4">
               <ScoreRing score={result.matchScore} label="Job Match Score" />
               <div>
-                <Badge>{RECOMMENDATION_LABEL[result.recommendation]}</Badge>
+                <Badge>{RECOMMENDATION_TIER_LABEL[result.recommendation]}</Badge>
                 <p className="text-muted-foreground mt-1.5 text-sm">
                   {result.summary}
                 </p>

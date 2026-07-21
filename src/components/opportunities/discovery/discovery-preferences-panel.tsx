@@ -20,6 +20,7 @@ import { TagInput } from "@/components/shared/tag-input";
 import { LocationPicker } from "@/components/location/location-picker";
 import {
   AVAILABILITY_LABEL,
+  buildDiscoveryPreferenceFormValue,
   DISCOVERY_FREQUENCY_LABEL,
   EXPERIENCE_LEVEL_LABEL,
 } from "@/features/discovery/types";
@@ -32,41 +33,6 @@ import type {
 import type { LocationPreferenceInput } from "@/features/location/types";
 import type { DiscoveryPreference } from "@/generated/prisma/client";
 
-function toFormValue(preference: DiscoveryPreference | null): DiscoveryPreferenceInput {
-  return {
-    preferredRoles: (preference?.preferredRoles as string[]) ?? [],
-    preferredCompanies: (preference?.preferredCompanies as string[]) ?? [],
-    companyBlacklist: (preference?.companyBlacklist as string[]) ?? [],
-    companyWhitelist: (preference?.companyWhitelist as string[]) ?? [],
-    industries: (preference?.industries as string[]) ?? [],
-    keywords: (preference?.keywords as string[]) ?? [],
-    salaryMin: preference?.salaryMin ?? null,
-    salaryMax: preference?.salaryMax ?? null,
-    salaryCurrency: preference?.salaryCurrency ?? null,
-    location: {
-      countries: (preference?.countries as string[]) ?? [],
-      states: (preference?.states as string[]) ?? [],
-      cities: (preference?.cities as string[]) ?? [],
-      remote: preference?.remote ?? true,
-      hybrid: preference?.hybrid ?? true,
-      onsite: preference?.onsite ?? true,
-      radiusKm: preference?.radiusKm ?? null,
-      openToRelocation: preference?.openToRelocation ?? false,
-      openToInternationalRelocation: preference?.openToInternationalRelocation ?? false,
-    },
-    experienceLevel: (preference?.experienceLevel as ExperienceLevel | null) ?? null,
-    availability: (preference?.availability as AvailabilityWindow | null) ?? null,
-    discoveryFrequency: (preference?.discoveryFrequency as DiscoveryFrequency) ?? "DAILY",
-    notifyInApp: preference?.notifyInApp ?? true,
-    preferredCompanySize: preference?.preferredCompanySize ?? null,
-    visaSponsorshipRequired: preference?.visaSponsorshipRequired ?? null,
-    travelWillingness: preference?.travelWillingness ?? null,
-    shiftPreference: preference?.shiftPreference ?? null,
-    joiningTimeline: preference?.joiningTimeline ?? null,
-    languages: (preference?.languages as string[]) ?? [],
-  };
-}
-
 const NONE_VALUE = "__none__";
 
 export function DiscoveryPreferencesPanel({
@@ -74,7 +40,9 @@ export function DiscoveryPreferencesPanel({
 }: {
   initialPreference: DiscoveryPreference | null;
 }) {
-  const [value, setValue] = useState<DiscoveryPreferenceInput>(toFormValue(initialPreference));
+  const [value, setValue] = useState<DiscoveryPreferenceInput>(
+    buildDiscoveryPreferenceFormValue(initialPreference),
+  );
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {

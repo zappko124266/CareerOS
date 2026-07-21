@@ -12,6 +12,9 @@ import { ResumeContentPreview } from "@/components/resume/resume-content-preview
 import { ResumeStatusBadge } from "@/components/resume/resume-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCareerGoal } from "@/features/career/queries";
+import { getDiscoveryPreference } from "@/features/discovery/queries";
+import { buildLocationSummary } from "@/features/discovery/types";
 import { getResumeWithAnalyses } from "@/features/resume/queries";
 import {
   AtsScoreBreakdownSchema,
@@ -30,13 +33,32 @@ export default async function ResumeDetailPage({
 }) {
   const { resumeId } = await params;
   const user = await verifySession();
-  const resume = await getResumeWithAnalyses(resumeId, user.id).catch(
-    () => null,
-  );
+  const [resume, careerGoal, discoveryPreference] = await Promise.all([
+    getResumeWithAnalyses(resumeId, user.id).catch(() => null),
+    getCareerGoal(user.id),
+    getDiscoveryPreference(user.id),
+  ]);
 
   if (!resume) {
     notFound();
   }
+
+  // Sprint 1.5 (Personalization) — reuses the same onboarding data the
+  // Coach/Dashboard read, just to frame the *existing* ATS analysis
+  // copy; the scoring itself is unchanged.
+  const targetRole = careerGoal?.targetRole ?? null;
+  const locationSummary = discoveryPreference
+    ? buildLocationSummary({
+        countries: discoveryPreference.countries as string[],
+        states: discoveryPreference.states as string[],
+        cities: discoveryPreference.cities as string[],
+        remote: discoveryPreference.remote,
+        hybrid: discoveryPreference.hybrid,
+        onsite: discoveryPreference.onsite,
+        openToRelocation: discoveryPreference.openToRelocation,
+      })
+    : null;
+  const analysisContext = [targetRole, locationSummary].filter(Boolean).join(" — ");
 
   const latestAnalysis = resume.analyses[0];
   const parsedContent = resume.parsedData
@@ -107,6 +129,11 @@ export default async function ResumeDetailPage({
           <Card>
             <CardHeader>
               <CardTitle>ATS analysis</CardTitle>
+              {analysisContext && (
+                <p className="text-muted-foreground text-sm">
+                  Reviewed with {analysisContext} in mind.
+                </p>
+              )}
             </CardHeader>
             <CardContent className="flex flex-col gap-6">
               {latestAnalysis ? (

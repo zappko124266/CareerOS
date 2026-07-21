@@ -79,3 +79,26 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
     isBrandNew: completedCount === 0,
   };
 }
+
+/**
+ * Onboarding Wizard progress — real, code-checked state on the same
+ * `DiscoveryPreference` row the wizard's own step data is saved to (no
+ * new table). `onboardingStep` tracks the furthest step reached, for
+ * resuming exactly where the user left off; `onboardingCompletedAt` is a
+ * real timestamp, not a fabricated boolean.
+ */
+export async function saveOnboardingProgress(userId: string, step: number): Promise<void> {
+  await prisma.discoveryPreference.upsert({
+    where: { userId },
+    create: { userId, onboardingStep: step },
+    update: { onboardingStep: step },
+  });
+}
+
+export async function completeOnboarding(userId: string): Promise<void> {
+  await prisma.discoveryPreference.upsert({
+    where: { userId },
+    create: { userId, onboardingCompletedAt: new Date() },
+    update: { onboardingCompletedAt: new Date() },
+  });
+}
