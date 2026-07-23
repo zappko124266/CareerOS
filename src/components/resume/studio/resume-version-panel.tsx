@@ -8,6 +8,7 @@ import {
   createResumeVersionAction,
   restoreResumeVersionAction,
 } from "@/actions/resume-studio";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -21,15 +22,16 @@ import { ResumeVersionCompare } from "./resume-version-compare";
 export function ResumeVersionPanel({
   resumeId,
   currentData,
-  versions: initialVersions,
+  versions,
+  onVersionsChange,
   onRestore,
 }: {
   resumeId: string;
   currentData: ResumeData;
   versions: ResumeVersion[];
+  onVersionsChange: (versions: ResumeVersion[]) => void;
   onRestore: (data: ResumeData) => void;
 }) {
-  const [versions, setVersions] = useState(initialVersions);
   const [label, setLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function ResumeVersionPanel({
     setSaving(false);
 
     if (result.status === "success") {
-      setVersions((prev) => [result.data, ...prev]);
+      onVersionsChange([result.data, ...versions]);
       setLabel("");
       toast.success("Version saved");
     } else {
@@ -106,7 +108,14 @@ export function ResumeVersionPanel({
                   className="ring-foreground/10 flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 ring-1"
                 >
                   <div>
-                    <p className="text-sm font-medium">{version.label}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">{version.label}</p>
+                      {version.targetCompanyName && (
+                        <Badge variant="outline">
+                          Tailored for {version.targetCompanyName}
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-muted-foreground text-xs">
                       {formatRelativeTime(new Date(version.createdAt))}
                     </p>

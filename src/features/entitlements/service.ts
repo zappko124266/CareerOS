@@ -43,6 +43,8 @@ export const PLAN_LIMITS: Record<PlanTier, Record<MeteredFeature, number | null>
     OFFER_COMPARISON: 5,
     CAREER_GAP_ASSESSMENT: 5,
     LINKEDIN_ANALYSIS: 5,
+    GMAIL_SYNC: 30,
+    CALENDAR_SYNC: 30,
   },
   PRO: {
     RESUME_TAILORING: null,
@@ -62,6 +64,8 @@ export const PLAN_LIMITS: Record<PlanTier, Record<MeteredFeature, number | null>
     OFFER_COMPARISON: null,
     CAREER_GAP_ASSESSMENT: null,
     LINKEDIN_ANALYSIS: null,
+    GMAIL_SYNC: null,
+    CALENDAR_SYNC: null,
   },
 };
 

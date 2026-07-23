@@ -38,6 +38,45 @@ export async function listInterviewsForOpportunity(opportunityId: string, userId
   });
 }
 
+/** Every interview across every opportunity this user has — Sprint 3
+ * (Career Agent). One query powers several things: the dashboard's
+ * Upcoming Interviews widget (filter `scheduledAt` in the future, sort
+ * ascending), the Career Inbox timeline (every row with a `scheduledAt`
+ * becomes one event), and — Sprint 17 (Calendar Intelligence) — Mission
+ * Control's Interview/Calendar card (meeting link, meeting status,
+ * conflict flags) and the Autonomous Career Agent's interview-lifecycle
+ * signals. The Sprint 17 fields were added to this *same* `select`
+ * rather than a second cross-opportunity interview query (Hard Lock 6). */
+export async function listInterviewEventsForUser(userId: string) {
+  return prisma.interview.findMany({
+    where: { opportunity: { userId } },
+    select: {
+      id: true,
+      stage: true,
+      /** Sprint 20 (Interview Intelligence) — the same append-only history
+       * `transitionInterviewStage` already writes; widening this one
+       * `select` (Hard Lock 6) rather than a second cross-opportunity
+       * query is what lets Career Memory show real stage transitions
+       * (`career-agent/inbox.ts`) and the Stage Tracker compute
+       * `daysWaiting` without an extra fetch. */
+      stageHistory: true,
+      createdAt: true,
+      scheduledAt: true,
+      roundLabel: true,
+      meetingStatus: true,
+      meetingStatusHistory: true,
+      meetingLink: true,
+      meetingPlatform: true,
+      timezone: true,
+      hasConflict: true,
+      conflictNote: true,
+      source: true,
+      opportunity: { select: { id: true, title: true, companyName: true } },
+    },
+    orderBy: { scheduledAt: "desc" },
+  });
+}
+
 /** Most recent `InterviewPrep` across every interview this user has —
  * backs the dashboard's Interview Readiness card. */
 export async function getLatestInterviewPrepForUser(userId: string) {
@@ -69,6 +108,19 @@ export async function getOwnedInterviewPrepOrThrow(interviewPrepId: string, user
   }
 
   return prep;
+}
+
+/** Sprint 17 — real existence check only (`opportunityId`s with a real
+ * `Offer` row), reused by Career Brain to derive "Offer Pending" vs
+ * "Offer Received" (`interviews/intelligence/tracking.ts`'s
+ * `deriveInterviewLifecycleLabel`) without a second, per-interview
+ * lookup. */
+export async function listOfferOpportunityIdsForUser(userId: string): Promise<string[]> {
+  const offers = await prisma.offer.findMany({
+    where: { opportunity: { userId } },
+    select: { opportunityId: true },
+  });
+  return offers.map((offer) => offer.opportunityId);
 }
 
 export async function getOfferForOpportunity(opportunityId: string) {

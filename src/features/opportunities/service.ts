@@ -57,6 +57,8 @@ export async function getResumeMatchProfile(
     skills: parsed.data.skills,
     currentTitle: parsed.data.experience[0]?.title ?? null,
     location: parsed.data.contact.location,
+    education: parsed.data.education,
+    certifications: parsed.data.certifications,
   };
 }
 

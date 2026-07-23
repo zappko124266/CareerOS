@@ -20,6 +20,8 @@ export const METERED_FEATURE_LABEL: Record<MeteredFeature, string> = {
   OFFER_COMPARISON: "Offer comparison",
   CAREER_GAP_ASSESSMENT: "Career gap assessment",
   LINKEDIN_ANALYSIS: "LinkedIn SEO analysis",
+  GMAIL_SYNC: "Gmail intelligence sync",
+  CALENDAR_SYNC: "Calendar intelligence sync",
 };
 
 export const METERED_FEATURE_CATEGORY: Record<MeteredFeature, string> = {
@@ -40,6 +42,8 @@ export const METERED_FEATURE_CATEGORY: Record<MeteredFeature, string> = {
   CAREER_GAP_ASSESSMENT: "Companies & Career Intelligence",
   LINKEDIN_ANALYSIS: "Companies & Career Intelligence",
   JOB_DISCOVERY_RUN: "Discovery",
+  GMAIL_SYNC: "Discovery",
+  CALENDAR_SYNC: "Interviews",
 };
 
 export const FEATURE_CATEGORY_ORDER = [

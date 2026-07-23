@@ -65,6 +65,22 @@ export async function listResumeVersions(resumeId: string, userId: string) {
   });
 }
 
+/** Sprint 12 (Job Studio) — every resume version tailored for this
+ * specific opportunity, across all of the user's resumes. Reads the
+ * `targetOpportunityId`/`targetCompanyName` fields Sprint 11 added to
+ * `ResumeVersion`, which until now were only ever written from Resume
+ * Studio and never read back anywhere. */
+export async function listResumeVersionsForOpportunity(
+  opportunityId: string,
+  userId: string,
+) {
+  return prisma.resumeVersion.findMany({
+    where: { targetOpportunityId: opportunityId, resume: { userId } },
+    include: { resume: { select: { id: true, title: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 export async function getOwnedResumeVersionOrThrow(
   versionId: string,
   resumeId: string,

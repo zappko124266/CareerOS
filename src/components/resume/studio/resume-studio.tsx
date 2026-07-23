@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
+import { z } from "zod";
 
 import { createResumeVersionAction, saveResumeDraftAction } from "@/actions/resume-studio";
+import { AtsScorePanel } from "@/components/resume/ats-score-panel";
+import { OptimizationSuggestionsList } from "@/components/resume/optimization-suggestions-list";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Tabs,
   TabsContent,
@@ -14,15 +18,23 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import type { ResumeTemplateId } from "@/components/resume/templates";
+import {
+  AtsScoreBreakdownSchema,
+  OptimizationSuggestionSchema,
+} from "@/features/resume/schema";
 import type { ResumeData } from "@/features/resume/schema";
-import type { ResumeVersion } from "@/generated/prisma/client";
+import { computeActionVerbUsage, computeReadability } from "@/features/resume/seo";
+import type { Opportunity, ResumeAnalysis, ResumeVersion } from "@/generated/prisma/client";
 
 import { ResumeBuilderEditor } from "./resume-builder-editor";
+import { ResumeCopilotPanel } from "./resume-copilot-panel";
 import { ResumeExportMenu } from "./resume-export-menu";
 import { ResumeKeywordPanel } from "./resume-keyword-panel";
 import { ResumeLivePreview } from "./resume-live-preview";
+import { ResumeMissingSkillsPanel } from "./resume-missing-skills-panel";
 import { ResumeSuggestionsPanel } from "./resume-suggestions-panel";
 import { ResumeTailoringPanel } from "./resume-tailoring-panel";
+import { ResumeTimeline } from "./resume-timeline";
 import { ResumeVersionPanel } from "./resume-version-panel";
 
 const AUTOSAVE_DELAY_MS = 1500;
@@ -55,17 +67,36 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 export function ResumeStudio({
   resumeId,
   resumeTitle,
+  resumeCreatedAt,
   initialData,
   initialVersions,
+  analyses,
+  missingSkills,
+  savedOpportunities,
+  name,
+  targetRole,
+  initialOpportunityId,
 }: {
   resumeId: string;
   resumeTitle: string;
+  resumeCreatedAt: Date;
   initialData: ResumeData;
   initialVersions: ResumeVersion[];
+  analyses: ResumeAnalysis[];
+  missingSkills: { skill: string; frequency: number }[];
+  savedOpportunities: Pick<Opportunity, "id" | "title" | "companyName" | "description">[];
+  name: string;
+  targetRole: string | null;
+  /** Sprint 12 (Job Studio) — set when arriving via a "Tailor a resume for
+   * this job" deep link from the Job Studio's resume recommendation
+   * panel (`?opportunityId=`); pre-selects that opportunity in the
+   * Tailoring tab's picker instead of requiring a manual pick. */
+  initialOpportunityId: string | null;
 }) {
   const [data, setData] = useState(initialData);
   const [templateId, setTemplateId] = useState<ResumeTemplateId>("minimal");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [versions, setVersions] = useState(initialVersions);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCheckedRecovery = useRef(false);
 
@@ -125,8 +156,14 @@ export function ResumeStudio({
    * AI tailoring suggestions. `createResumeVersionAction` snapshots
    * whatever's currently persisted in `Resume.parsedData`, not client
    * state — so this explicitly flushes the live-edited `data` first
-   * (bypassing the debounce timer) rather than racing it. */
-  async function saveTailoredVersion(label: string): Promise<boolean> {
+   * (bypassing the debounce timer) rather than racing it. Sprint 11:
+   * threads through the optional saved-opportunity target so the new
+   * version is a real company-specific variant, not just a free-text
+   * label. */
+  async function saveTailoredVersion(
+    label: string,
+    target?: { opportunityId: string; companyName: string },
+  ): Promise<boolean> {
     const clean = sanitize(data);
     const saveResult = await saveResumeDraftAction(resumeId, clean);
     if (saveResult.status !== "success") {
@@ -134,12 +171,13 @@ export function ResumeStudio({
       return false;
     }
 
-    const versionResult = await createResumeVersionAction(resumeId, label);
+    const versionResult = await createResumeVersionAction(resumeId, label, target);
     if (versionResult.status !== "success") {
       toast.error(versionResult.message);
       return false;
     }
 
+    setVersions((prev) => [versionResult.data, ...prev]);
     toast.success("Saved as a new resume version");
     return true;
   }
@@ -154,6 +192,13 @@ export function ResumeStudio({
     });
     updateData({ ...data, experience });
   }
+
+  const latestAnalysis = analyses[0] ?? null;
+  const actionVerbUsage = useMemo(() => computeActionVerbUsage(data), [data]);
+  const readability = useMemo(() => computeReadability(data), [data]);
+  const optimizationSuggestions = latestAnalysis
+    ? z.array(OptimizationSuggestionSchema).parse(latestAnalysis.suggestions)
+    : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -178,11 +223,13 @@ export function ResumeStudio({
         </div>
       </div>
 
-      <Tabs defaultValue="editor">
+      <Tabs defaultValue={initialOpportunityId ? "tailor" : "editor"}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="editor">Editor & Preview</TabsTrigger>
+          <TabsTrigger value="health">Health</TabsTrigger>
           <TabsTrigger value="tailor">Tailor & Optimize</TabsTrigger>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
+          <TabsTrigger value="versions">Versions & Timeline</TabsTrigger>
+          <TabsTrigger value="copilot">Ask Copilot</TabsTrigger>
         </TabsList>
 
         <TabsContent value="editor">
@@ -196,24 +243,63 @@ export function ResumeStudio({
           </div>
         </TabsContent>
 
+        <TabsContent value="health" className="flex flex-col gap-4">
+          <Card>
+            <CardContent className="flex flex-col gap-6">
+              {latestAnalysis ? (
+                <>
+                  <AtsScorePanel
+                    overallScore={latestAnalysis.overallScore}
+                    breakdown={AtsScoreBreakdownSchema.parse(latestAnalysis.breakdown)}
+                    actionVerbUsage={actionVerbUsage}
+                    readability={readability}
+                  />
+                  <OptimizationSuggestionsList suggestions={optimizationSuggestions} />
+                </>
+              ) : (
+                <p className="text-muted-foreground text-sm">
+                  No ATS analysis yet — run one from the resume page.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <ResumeMissingSkillsPanel
+            missingSkills={missingSkills}
+            savedOpportunityCount={savedOpportunities.length}
+          />
+          <ResumeSuggestionsPanel resumeId={resumeId} />
+        </TabsContent>
+
         <TabsContent value="tailor" className="flex flex-col gap-4">
           <ResumeTailoringPanel
             resumeId={resumeId}
             data={data}
+            savedOpportunities={savedOpportunities}
+            initialOpportunityId={initialOpportunityId}
             onApplyBullet={applyBullet}
             onSaveVersion={saveTailoredVersion}
           />
           <ResumeKeywordPanel resumeId={resumeId} />
-          <ResumeSuggestionsPanel resumeId={resumeId} />
         </TabsContent>
 
-        <TabsContent value="versions">
+        <TabsContent value="versions" className="flex flex-col gap-4">
+          <ResumeTimeline
+            resumeCreatedAt={resumeCreatedAt}
+            resumeTitle={resumeTitle}
+            analyses={analyses}
+            versions={versions}
+          />
           <ResumeVersionPanel
             resumeId={resumeId}
             currentData={data}
-            versions={initialVersions}
+            versions={versions}
+            onVersionsChange={setVersions}
             onRestore={updateData}
           />
+        </TabsContent>
+
+        <TabsContent value="copilot">
+          <ResumeCopilotPanel name={name} targetRole={targetRole} />
         </TabsContent>
       </Tabs>
     </div>

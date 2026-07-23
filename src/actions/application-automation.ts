@@ -23,7 +23,16 @@ import {
   RecordApplicationSubmissionInputSchema,
   RecordFailedSubmissionInputSchema,
 } from "@/features/applications/schema";
-import type { ApplicationSubmission } from "@/generated/prisma/client";
+import { getConnector } from "@/features/connectors/registry";
+import {
+  approveApplicationExecution,
+  declineApplicationExecution,
+  submitApprovedExecution,
+} from "@/features/application-engine/execution";
+import { getOwnedApplicationExecutionOrThrow } from "@/features/application-engine/queries";
+import { DB_SOURCE_TO_PROVIDER } from "@/features/opportunities/types";
+import { prisma } from "@/lib/prisma";
+import type { ApplicationExecution, ApplicationSubmission, ApprovalPolicy } from "@/generated/prisma/client";
 import type { DataActionResult } from "@/types/action";
 
 function toActionError(error: unknown, fallbackMessage: string): DataActionResult<never> {
@@ -186,5 +195,113 @@ export async function recordFailedSubmissionAction(
     return { status: "success", data: submission };
   } catch (error) {
     return toActionError(error, "We couldn't update that submission.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Autonomous Application Engine — Human Approval (Sprint 18)
+// ---------------------------------------------------------------------------
+
+function isOwnedByExpectedStatus(execution: ApplicationExecution): DataActionResult<never> | null {
+  if (execution.status !== "WAITING_APPROVAL") {
+    return { status: "error", message: "This application isn't waiting for approval anymore." };
+  }
+  return null;
+}
+
+/** The real Human Approval "yes" — verifies ownership and status, records
+ * the approval (`approveApplicationExecution`), then hands off to the
+ * *same* Connector Apply + Submission Tracking stages the auto-approved
+ * path uses (`submitApprovedExecution`) — no second submission path. */
+export async function approveApplicationExecutionAction(
+  executionId: string,
+): Promise<DataActionResult<{ status: ApplicationExecution["status"] }>> {
+  const user = await verifySession();
+
+  try {
+    const execution = await getOwnedApplicationExecutionOrThrow(executionId, user.id);
+    const statusError = isOwnedByExpectedStatus(execution);
+    if (statusError) return statusError;
+
+    const connectorId = DB_SOURCE_TO_PROVIDER[execution.opportunity.source];
+    const connector = connectorId ? getConnector(connectorId) : undefined;
+    if (!connector) {
+      return { status: "error", message: "No connector is available to submit this application." };
+    }
+
+    await approveApplicationExecution(execution);
+    await logAuditEvent("application_execution.approved", {
+      userId: user.id,
+      metadata: { executionId, opportunityId: execution.opportunityId },
+    });
+
+    const questionnaireAnswers = (execution.questionnaireAnswers ?? []) as {
+      questionId: string;
+      question: string;
+      suggestedAnswer: string;
+    }[];
+
+    const result = await submitApprovedExecution(
+      execution.opportunity,
+      connector,
+      execution.resumeVersionId,
+      execution.coverLetterDocumentId,
+      questionnaireAnswers,
+    );
+
+    revalidatePath("/applications");
+    revalidatePath(`/opportunities/${execution.opportunityId}`);
+    return { status: "success", data: { status: result.status } };
+  } catch (error) {
+    return toActionError(error, "We couldn't approve that application.");
+  }
+}
+
+/** The real Human Approval "no." */
+export async function declineApplicationExecutionAction(
+  executionId: string,
+): Promise<DataActionResult<{ status: ApplicationExecution["status"] }>> {
+  const user = await verifySession();
+
+  try {
+    const execution = await getOwnedApplicationExecutionOrThrow(executionId, user.id);
+    const statusError = isOwnedByExpectedStatus(execution);
+    if (statusError) return statusError;
+
+    const updated = await declineApplicationExecution(execution.opportunityId);
+    await logAuditEvent("application_execution.declined", {
+      userId: user.id,
+      metadata: { executionId, opportunityId: execution.opportunityId },
+    });
+
+    revalidatePath("/applications");
+    return { status: "success", data: { status: updated.status } };
+  } catch (error) {
+    return toActionError(error, "We couldn't decline that application.");
+  }
+}
+
+/** Human Approval's configurable policy (`Profile.applicationApprovalPolicy`) —
+ * "Always Ask" / "Ask For High Priority" / "Auto Apply Low Risk" / "Never
+ * Auto Apply." */
+export async function updateApprovalPolicyAction(
+  policy: ApprovalPolicy,
+): Promise<DataActionResult<{ policy: ApprovalPolicy }>> {
+  const user = await verifySession();
+
+  try {
+    await prisma.profile.update({
+      where: { id: user.id },
+      data: { applicationApprovalPolicy: policy },
+    });
+    await logAuditEvent("application_approval_policy.updated", {
+      userId: user.id,
+      metadata: { policy },
+    });
+    revalidatePath("/settings");
+    revalidatePath("/applications");
+    return { status: "success", data: { policy } };
+  } catch (error) {
+    return toActionError(error, "We couldn't update your approval policy.");
   }
 }

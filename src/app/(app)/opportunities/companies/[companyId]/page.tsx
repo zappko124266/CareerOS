@@ -12,13 +12,19 @@ export default async function CompanyIntelligencePage({
 }: {
   params: Promise<{ companyId: string }>;
 }) {
-  await verifySession();
+  const user = await verifySession();
   const { companyId } = await params;
 
-  const intelligence = await getCompanyIntelligence(companyId).catch(() => null);
+  const intelligence = await getCompanyIntelligence(companyId, user.id).catch(() => null);
   if (!intelligence) {
     notFound();
   }
 
-  return <CompanyIntelligencePanel company={intelligence.company} aggregates={intelligence.aggregates} />;
+  return (
+    <CompanyIntelligencePanel
+      company={intelligence.company}
+      aggregates={intelligence.aggregates}
+      recruiters={intelligence.recruiters}
+    />
+  );
 }

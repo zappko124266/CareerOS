@@ -14,7 +14,10 @@ import { findCountry, findState } from "@/features/location/service";
 import { decodeCityKey, decodeStateKey } from "@/features/location/types";
 import type { Prisma } from "@/generated/prisma/client";
 
+import { detectListingChanges } from "./change-detection";
 import { computeListingFingerprint, DUPLICATE_MATCH_WINDOW_MS } from "./dedupe";
+import { computeOpportunityFingerprint } from "./fingerprint";
+import { recordListingChanged, recordListingClosed } from "./sync-events";
 import {
   computeCompanyPreferenceMatch,
   computeHiringActivitySignal,
@@ -29,6 +32,12 @@ import type { DiscoveryTrigger } from "./types";
 const MAX_LISTINGS_TO_RANK = 40;
 const RANKING_CHUNK_SIZE = 20;
 const MAX_COMPANIES_TO_RANK = 20;
+/** Sprint 19 — how long a previously-active listing can go un-re-seen by
+ * its own source before the closure pass infers it's gone. Deliberately
+ * several real scheduled runs' worth (discovery runs roughly daily), not
+ * one, to absorb ordinary pagination/ranking drift rather than
+ * over-declaring closures. */
+const CLOSED_AFTER_MISSING_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_ELIGIBILITY_NOTE_COMPANIES = 3;
 
 function locationSummaryFor(preference: {
@@ -99,6 +108,9 @@ export interface DiscoveryRunSummary {
   newJobsFound: number;
   companiesFound: number;
   duplicatesFound: number;
+  /** Sprint 19 — real counts from the Change Detector / closure pass. */
+  updatedJobsFound: number;
+  closedJobsFound: number;
   connectorsUsed: string[];
   errors: { connectorId: string; message: string }[];
 }
@@ -226,6 +238,7 @@ export async function runDiscovery(
 
     let newJobsFound = 0;
     let duplicatesFound = 0;
+    let updatedJobsFound = 0;
     const upsertedListingIds: string[] = [];
 
     for (const listing of uniqueListings) {
@@ -235,6 +248,26 @@ export async function runDiscovery(
       });
 
       const fingerprint = computeListingFingerprint(listing.companyName, listing.title);
+      // Sprint 19's Fingerprint Engine — a separate, stable identity+content
+      // signature for this exact (source, sourceId), see `fingerprint.ts`'s
+      // own doc comment on how this differs from `fingerprint` above.
+      const contentFingerprint = computeOpportunityFingerprint({
+        source: dbSource,
+        sourceId: listing.sourceId,
+        companyName: listing.companyName,
+        title: listing.title,
+        location: listing.location,
+        employmentType: listing.employmentType,
+        salaryMin: listing.salaryMin ?? null,
+        salaryMax: listing.salaryMax ?? null,
+      });
+
+      // Sprint 19 — Change Detection, computed *before* the upsert below
+      // overwrites `existing`'s field values, using the exact
+      // already-fetched row (no second query). A brand-new row has
+      // nothing to diff against.
+      const changes = existing ? detectListingChanges(existing, listing) : [];
+      const syncStatus = !existing ? "NEW" : changes.length > 0 ? "UPDATED" : "UNCHANGED";
 
       // Module 6 — Duplicate Engine. Only look for a cross-source match
       // when this is genuinely a brand-new row for this source+sourceId;
@@ -285,6 +318,9 @@ export async function runDiscovery(
           postedAt: listing.postedAt ? new Date(listing.postedAt) : null,
           discoveryRunId: run.id,
           fingerprint,
+          contentFingerprint,
+          syncStatus,
+          lastSeenAt: new Date(),
           duplicateOfId,
         },
         update: {
@@ -300,6 +336,14 @@ export async function runDiscovery(
           applyUrl: listing.applyUrl,
           discoveryRunId: run.id,
           fingerprint,
+          contentFingerprint,
+          syncStatus,
+          lastSeenAt: new Date(),
+          // A listing that reappears after being inferred `CLOSED` was
+          // real evidence of closure that turned out to be wrong (a
+          // temporary gap in the source's own results) — real, honest
+          // self-correction rather than leaving a stale `CLOSED` label.
+          closedAt: null,
         },
       });
 
@@ -310,10 +354,56 @@ export async function runDiscovery(
           newJobsFound += 1;
           upsertedListingIds.push(row.id);
         }
-      } else if (existing.disposition === "NEW" && !existing.duplicateOfId) {
-        // Still un-actioned and not itself a duplicate — eligible for
-        // re-ranking with fresh data.
-        upsertedListingIds.push(row.id);
+      } else {
+        if (changes.length > 0) {
+          updatedJobsFound += 1;
+          await recordListingChanged(userId, { id: row.id, companyName: listing.companyName, title: listing.title }, changes);
+        }
+        if (existing.disposition === "NEW" && !existing.duplicateOfId) {
+          // Still un-actioned and not itself a duplicate — eligible for
+          // re-ranking with fresh data.
+          upsertedListingIds.push(row.id);
+        }
+      }
+    }
+
+    // Sprint 19 — the closure pass ("removed opportunities," "closed
+    // opportunities"). Real, disclosed limitation: a search-API connector
+    // only ever returns *current* results for a query, so "this listing's
+    // sourceId didn't appear in this run" is real evidence, not proof —
+    // pagination/ranking drift on the source's own side could also cause
+    // a temporary miss. Bounded to sources this run actually queried (a
+    // connector that errored or wasn't configured contributes no evidence
+    // either way, so its listings are never touched), and requires
+    // `CLOSED_AFTER_MISSING_MS` to have passed since the listing was last
+    // genuinely re-seen — several missed runs' worth of buffer, not one.
+    const seenSourceIds = new Set(uniqueListings.map((listing) => `${PROVIDER_TO_DB_SOURCE[listing.source]}:${listing.sourceId}`));
+    const queriedSources = [...new Set(connectorsUsed)].map((id) => PROVIDER_TO_DB_SOURCE[id as keyof typeof PROVIDER_TO_DB_SOURCE]).filter(Boolean);
+    let closedJobsFound = 0;
+
+    if (queriedSources.length > 0) {
+      const closureCutoff = new Date(Date.now() - CLOSED_AFTER_MISSING_MS);
+      const candidatesForClosure = await prisma.discoveredListing.findMany({
+        where: {
+          userId,
+          source: { in: queriedSources },
+          disposition: { in: ["NEW", "SAVED"] },
+          closedAt: null,
+          duplicateOfId: null,
+          lastSeenAt: { lt: closureCutoff },
+        },
+        select: { id: true, source: true, sourceId: true, companyName: true, title: true },
+      });
+
+      for (const candidate of candidatesForClosure) {
+        if (seenSourceIds.has(`${candidate.source}:${candidate.sourceId}`)) continue;
+
+        await prisma.discoveredListing.update({
+          where: { id: candidate.id },
+          data: { syncStatus: "CLOSED", closedAt: new Date() },
+        });
+        await recordListingClosed(userId, candidate);
+        closedJobsFound += 1;
       }
     }
 
@@ -478,6 +568,8 @@ export async function runDiscovery(
         newJobsFound,
         companiesFound,
         duplicatesFound,
+        updatedJobsFound,
+        closedJobsFound,
         errors,
         completedAt: new Date(),
       },
@@ -489,6 +581,8 @@ export async function runDiscovery(
       newJobsFound,
       companiesFound,
       duplicatesFound,
+      updatedJobsFound,
+      closedJobsFound,
       connectorsUsed: [...new Set(connectorsUsed)],
       errors,
     };

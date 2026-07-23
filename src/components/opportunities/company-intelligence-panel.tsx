@@ -9,17 +9,23 @@ import { generateCompanyResearchAction } from "@/actions/companies";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/shared/empty-state";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { SUBMISSION_METHOD_LABEL } from "@/features/applications/types";
 import type { CompanyAggregates } from "@/features/companies/types";
+import type { EnrichedRecruiter } from "@/features/recruiters/orchestrator";
+import { RELATIONSHIP_HEALTH_LABEL } from "@/features/recruiters/scoring";
 import type { Company } from "@/generated/prisma/client";
 
 export function CompanyIntelligencePanel({
   company: initialCompany,
   aggregates,
+  recruiters,
 }: {
   company: Company;
   aggregates: CompanyAggregates;
+  /** Sprint 21, Module 14 — this user's own recruiters at this company. */
+  recruiters: EnrichedRecruiter[];
 }) {
   const [company, setCompany] = useState(initialCompany);
   const researchAction = useAsyncAction(generateCompanyResearchAction);
@@ -183,6 +189,36 @@ export function CompanyIntelligencePanel({
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold">Your recruiters here</h2>
+          <p className="text-muted-foreground text-sm">
+            Real, self-reported relationships from your Recruiter CRM — never inferred.
+          </p>
+          {recruiters.length === 0 ? (
+            <EmptyState title="No recruiters tracked at this company yet" className="py-6" />
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {recruiters.map((recruiter) => (
+                <li key={recruiter.id} className="flex items-center justify-between gap-2 text-sm">
+                  <Link href={`/recruiters/${recruiter.id}`} className="min-w-0 truncate hover:underline">
+                    {recruiter.name}
+                    {recruiter.title ? ` — ${recruiter.title}` : ""}
+                  </Link>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <Badge variant="secondary">{RELATIONSHIP_HEALTH_LABEL[recruiter.health]}</Badge>
+                    <span className="text-muted-foreground text-xs">
+                      {recruiter.connectedOpportunityIds.length} connected opportunit
+                      {recruiter.connectedOpportunityIds.length === 1 ? "y" : "ies"}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

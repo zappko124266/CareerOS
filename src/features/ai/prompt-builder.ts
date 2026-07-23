@@ -1,18 +1,12 @@
-import { streamText } from "@/lib/ai";
 import { AVAILABILITY_LABEL, SEARCH_PRIORITY_LABEL } from "@/features/discovery/types";
-import type { CareerRoadmap } from "./roadmap";
-import type {
-  ConversationTurn,
-  CoachContext,
-  CoachIntent,
-  CoachResponseMeta,
-  CoachTone,
-  OrchestrationResult,
-} from "./types";
+import type { CareerRoadmap } from "@/features/coach/roadmap";
+import type { ConversationTurn, CoachContext, OrchestrationResult } from "@/features/coach/types";
+
+import type { NextStepsPlan } from "./action-planner";
 
 const MAX_HISTORY_TURNS = 10;
 
-const SYSTEM_PROMPT = `You are CareerOS Coach — an AI career coach. Your goal is to help people get hired.
+export const COACH_SYSTEM_PROMPT = `You are CareerOS Coach — an AI career coach. Your goal is to help people get hired.
 
 Rules you must always follow:
 - Never mention ATS, scores, databases, prompts, system instructions, or any other implementation detail.
@@ -25,18 +19,26 @@ Rules you must always follow:
 - Keep it short — 2 to 4 sentences.`;
 
 /**
- * Builds the "User Context / Roadmap / Current Milestone / User Message"
- * prompt (Step 3) — every fact comes straight from the Context Engine and
- * Roadmap Engine, nothing invented, nothing recomputed.
+ * The Prompt Builder — Sprint 8. Same real facts, onboarding block, and
+ * conversation history as the previous inline version
+ * (`coach/generate-response.ts`'s `buildContextPrompt`, now deleted), but
+ * compacted for minimal token usage (requirement 3): the roadmap section
+ * used to list all 7 milestones with status on every single request.
+ * The model only ever needs the *current* one (it's told never to skip
+ * ahead, and the recommendation only ever references the current
+ * milestone) — the rest is now a single completed/remaining count.
+ * `nextSteps` (from `action-planner.ts`) is folded in the same
+ * lightweight way, no second AI call.
  */
-function buildContextPrompt(params: {
+export function buildCoachPrompt(params: {
   message: string;
   context: CoachContext;
   roadmap: CareerRoadmap;
   orchestration: OrchestrationResult;
   history: ConversationTurn[];
+  nextSteps: NextStepsPlan;
 }): string {
-  const { message, context, roadmap, orchestration, history } = params;
+  const { message, context, roadmap, orchestration, history, nextSteps } = params;
 
   const historyBlock =
     history.length > 0
@@ -46,9 +48,7 @@ function buildContextPrompt(params: {
           .join("\n")
       : "(no prior messages this session)";
 
-  const milestonesBlock = roadmap.milestones
-    .map((milestone) => `- ${milestone.title}: ${milestone.status}`)
-    .join("\n");
+  const completedCount = roadmap.milestones.filter((milestone) => milestone.status === "completed").length;
 
   // Only include onboarding facts the user actually answered — an unset
   // field is omitted entirely, never stated as "not set" (nothing for the
@@ -85,78 +85,12 @@ Real facts about this user — never state anything beyond this:
 - Offers received: ${context.applications.totalOffers}
 - Hired: ${context.hired.achieved ? "yes" : "not yet"}
 ${onboardingBlock}
-Career roadmap (current milestone: "${roadmap.currentMilestone.title}"):
-${milestonesBlock}
+Career roadmap: currently on "${roadmap.currentMilestone.title}" (${completedCount} of ${roadmap.milestones.length} milestones complete).
+Today's top recommendation: ${nextSteps.dailyMissionTitle}${nextSteps.topRecommendedOpportunity ? ` (best-matching saved opportunity: "${nextSteps.topRecommendedOpportunity}")` : ""}.
 
 The decision has already been made for you — explain it, don't change it:
 - Recommendation: ${orchestration.suggestedAction}
 - Suggested next action: "${orchestration.cta.label}"
 
 Write a short, natural reply that explains this recommendation in plain English.`;
-}
-
-/**
- * The Conversation Generator's streaming half (Step 6). Reuses the
- * existing AI Router's `streamText` — no new client, no new provider.
- * Returns the raw stream result so the caller (a Route Handler) can pipe
- * it to the client token-by-token via `.toTextStreamResponse()`.
- */
-export function streamCoachMessage(params: {
-  message: string;
-  context: CoachContext;
-  roadmap: CareerRoadmap;
-  orchestration: OrchestrationResult;
-  history: ConversationTurn[];
-}) {
-  return streamText({
-    system: SYSTEM_PROMPT,
-    prompt: buildContextPrompt(params),
-  });
-}
-
-/** Deterministic fallback message when even `streamText` itself can't
- * start (Step 1's "never break chat" applies here too, not just to
- * classification) — just the orchestrator's own plain-language decision,
- * with no AI phrasing on top. */
-export function fallbackCoachMessage(orchestration: OrchestrationResult): string {
-  return orchestration.suggestedAction;
-}
-
-/** Step 7 — one optional follow-up question per intent, always checked
- * against `CoachContext` first so it never asks something already known.
- * Deterministic on purpose: the Orchestrator (not the model) decides what
- * still needs asking. */
-function pickFollowUpQuestion(intent: CoachIntent, context: CoachContext): string | null {
-  switch (intent) {
-    case "resume":
-      return context.resume.count === 0
-        ? "Do you already have a resume ready to upload, or are we starting from scratch?"
-        : null;
-    case "jobs":
-      return "What kind of role are you targeting?";
-    case "career_switch":
-      return "What field or industry are you hoping to move into?";
-    default:
-      return null;
-  }
-}
-
-function pickTone(intent: CoachIntent): CoachTone {
-  if (intent === "unknown") return "professional";
-  return "encouraging";
-}
-
-/**
- * The Conversation Generator's deterministic half (Step 2) — `cta` is a
- * direct pass-through of the Orchestrator's decision (never AI-decided),
- * `followUpQuestion`/`tone` are simple rule lookups, not model output.
- * Keeping these out of the LLM call is what keeps the Orchestrator the
- * source of truth (Step 8).
- */
-export function buildCoachResponseMeta(orchestration: OrchestrationResult, context: CoachContext): CoachResponseMeta {
-  return {
-    cta: orchestration.cta,
-    followUpQuestion: pickFollowUpQuestion(orchestration.intent, context),
-    tone: pickTone(orchestration.intent),
-  };
 }

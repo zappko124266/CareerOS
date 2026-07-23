@@ -350,7 +350,10 @@ interface BestResumeSelection {
  * `MAX_RESUMES_TO_RANK` to bound AI cost) is scored against this job and
  * the highest-scoring one wins — a real, explainable selection, never a
  * guess. */
-async function selectBestResume(
+/** Exported (Sprint 18) so `features/application-engine/resume-selection.ts`
+ * reuses this exact selection logic instead of re-implementing it — the
+ * function itself is unchanged. */
+export async function selectBestResume(
   userId: string,
   jobDescription: string,
 ): Promise<BestResumeSelection> {
@@ -645,6 +648,50 @@ export async function recordApplicationSubmission(
   logger.info("applications.submission_recorded", {
     opportunityId,
     method: input.method,
+  });
+
+  return submission;
+}
+
+/**
+ * Sprint 18 — the `OFFICIAL_API` counterpart to `recordApplicationSubmission`
+ * above, deliberately kept as a separate function rather than widening
+ * that one's accepted `method` union: `recordApplicationSubmission`'s own
+ * doc comment is explicit that its three manual methods represent
+ * something the *user* did themselves, and this sprint doesn't change
+ * that contract. This function exists for the one real, different case —
+ * a `JobConnector.apply()` call CareerOS itself made actually succeeded
+ * — and reuses the same `transitionOpportunityStatus` call so both paths
+ * move the opportunity to `APPLIED` identically. Called *only* from
+ * `features/application-engine/submission.ts`, itself only reachable
+ * once a real Easy-Apply connector exists (none do today — see
+ * `docs/connectors/CONNECTOR_CAPABILITY_MATRIX.md`).
+ */
+export async function recordAutomatedApplicationSubmission(input: {
+  opportunityId: string;
+  resumeVersionId: string | null;
+  coverLetterDocumentId: string | null;
+  externalApplicationId: string | null;
+}) {
+  const opportunity = await prisma.opportunity.findUniqueOrThrow({ where: { id: input.opportunityId } });
+
+  const submission = await prisma.applicationSubmission.create({
+    data: {
+      opportunityId: input.opportunityId,
+      method: "OFFICIAL_API",
+      result: "CONFIRMED",
+      connectorSource: opportunity.source,
+      resumeVersionId: input.resumeVersionId,
+      coverLetterDocumentId: input.coverLetterDocumentId,
+      submittedAt: new Date(),
+      notes: input.externalApplicationId ? `External application id: ${input.externalApplicationId}` : null,
+    },
+  });
+
+  await transitionOpportunityStatus(opportunity, "APPLIED");
+
+  logger.info("applications.automated_submission_recorded", {
+    opportunityId: input.opportunityId,
   });
 
   return submission;

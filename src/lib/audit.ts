@@ -47,11 +47,15 @@ export type AuditAction =
   | "recruiter.deleted"
   | "recruiter_interaction.logged"
   | "recruiter_interaction.deleted"
+  | "referral.created"
+  | "referral.status_changed"
+  | "referral.deleted"
   | "interview.created"
   | "interview.stage_changed"
   | "interview.feedback_updated"
   | "interview_prep.generated"
   | "interview_answer_feedback.generated"
+  | "interview_feedback.analyzed"
   | "offer.created"
   | "offer.updated"
   | "offer.deleted"
@@ -67,7 +71,18 @@ export type AuditAction =
   | "linkedin_analysis.generated"
   | "linkedin_profile.version_created"
   | "linkedin_profile.version_restored"
-  | "onboarding.completed";
+  | "onboarding.completed"
+  | "profile.updated"
+  | "connector.connected"
+  | "connector.disconnected"
+  | "application_execution.approved"
+  | "application_execution.declined"
+  | "application_approval_policy.updated"
+  | "discovery.listing_changed"
+  | "discovery.listing_closed"
+  | "automation.task_completed"
+  | "automation.task_failed"
+  | "automation.task_skipped";
 
 /**
  * Appends a row to `audit_logs`. Call this from Server Actions and Route

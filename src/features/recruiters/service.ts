@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { getOwnedInteractionOrThrow, getOwnedRecruiterOrThrow } from "./queries";
 import type {
@@ -21,6 +22,8 @@ export async function createRecruiter(userId: string, input: CreateRecruiterInpu
       linkedinUrl: input.linkedinUrl,
       email: input.email,
       notes: input.notes,
+      priority: input.priority,
+      tags: (input.tags ?? []) as unknown as Prisma.InputJsonValue,
     },
   });
 }
@@ -37,6 +40,8 @@ export async function updateRecruiter(userId: string, input: UpdateRecruiterInpu
       linkedinUrl: input.linkedinUrl,
       email: input.email,
       notes: input.notes,
+      priority: input.priority,
+      tags: input.tags === undefined ? undefined : (input.tags as unknown as Prisma.InputJsonValue),
     },
   });
 }

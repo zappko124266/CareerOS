@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Sparkles } from "lucide-react";
 
 import { tailorResumeStudioAction } from "@/actions/resume-studio";
@@ -8,11 +8,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import type { ResumeData } from "@/features/resume/schema";
+import type { Opportunity } from "@/generated/prisma/client";
 
 const BULLET_ID_SEPARATOR = ":";
+const NONE_VALUE = "__none__";
 
 function flattenBullets(data: ResumeData) {
   return data.experience.flatMap((entry, experienceIndex) =>
@@ -27,15 +36,24 @@ function flattenBullets(data: ResumeData) {
 export function ResumeTailoringPanel({
   resumeId,
   data,
+  savedOpportunities,
+  initialOpportunityId,
   onApplyBullet,
   onSaveVersion,
 }: {
   resumeId: string;
   data: ResumeData;
+  /** Sprint 11, requirement 4 — reused from `CareerBrain.raw.opportunities`
+   * (already fetched by the Studio page), never a new query. */
+  savedOpportunities: Pick<Opportunity, "id" | "title" | "companyName" | "description">[];
+  /** Sprint 12 (Job Studio) — pre-selects this opportunity when arriving
+   * via the "Tailor a resume for this job" deep link. */
+  initialOpportunityId: string | null;
   onApplyBullet: (experienceIndex: number, bulletIndex: number, text: string) => void;
-  onSaveVersion: (label: string) => Promise<boolean>;
+  onSaveVersion: (label: string, target?: { opportunityId: string; companyName: string }) => Promise<boolean>;
 }) {
   const [jobDescription, setJobDescription] = useState("");
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState(NONE_VALUE);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [savingVersion, setSavingVersion] = useState(false);
   const { run, isPending, isSlow, result, error, reset } = useAsyncAction(
@@ -43,6 +61,22 @@ export function ResumeTailoringPanel({
   );
 
   const bulletsById = new Map(flattenBullets(data).map((bullet) => [bullet.id, bullet]));
+  const selectedOpportunity = savedOpportunities.find((o) => o.id === selectedOpportunityId) ?? null;
+
+  useEffect(() => {
+    if (initialOpportunityId) {
+      handleSelectOpportunity(initialOpportunityId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpportunityId]);
+
+  function handleSelectOpportunity(opportunityId: string) {
+    setSelectedOpportunityId(opportunityId);
+    const opportunity = savedOpportunities.find((o) => o.id === opportunityId);
+    if (opportunity?.description) {
+      setJobDescription(opportunity.description);
+    }
+  }
 
   function handleTailor() {
     const bullets = flattenBullets(data).map(({ id, text }) => ({ id, text }));
@@ -59,7 +93,13 @@ export function ResumeTailoringPanel({
 
   async function handleSaveVersion() {
     setSavingVersion(true);
-    await onSaveVersion(`AI-optimized ${new Date().toLocaleDateString()}`);
+    const label = selectedOpportunity
+      ? `Tailored for ${selectedOpportunity.companyName}`
+      : `AI-optimized ${new Date().toLocaleDateString()}`;
+    const target = selectedOpportunity
+      ? { opportunityId: selectedOpportunity.id, companyName: selectedOpportunity.companyName }
+      : undefined;
+    await onSaveVersion(label, target);
     setSavingVersion(false);
   }
 
@@ -75,13 +115,35 @@ export function ResumeTailoringPanel({
           </p>
         </div>
 
+        {savedOpportunities.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="tailoring-opportunity">Tailor for a saved opportunity</Label>
+            <Select value={selectedOpportunityId} onValueChange={handleSelectOpportunity}>
+              <SelectTrigger id="tailoring-opportunity" className="w-full">
+                <SelectValue placeholder="Choose one, or paste a job description below" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>None — paste manually</SelectItem>
+                {savedOpportunities.map((opportunity) => (
+                  <SelectItem key={opportunity.id} value={opportunity.id}>
+                    {opportunity.title} · {opportunity.companyName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2">
           <Label htmlFor="tailoring-job-description">Target job description</Label>
           <Textarea
             id="tailoring-job-description"
             rows={6}
             value={jobDescription}
-            onChange={(event) => setJobDescription(event.target.value)}
+            onChange={(event) => {
+              setJobDescription(event.target.value);
+              setSelectedOpportunityId(NONE_VALUE);
+            }}
             placeholder="Paste the job posting here…"
           />
         </div>

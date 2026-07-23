@@ -3,3 +3,5 @@ export * from "./interview-readiness/service";
 export * from "./interview-readiness/types";
 export * from "./answer-feedback/service";
 export * from "./answer-feedback/types";
+export * from "./feedback-analysis/service";
+export * from "./feedback-analysis/types";

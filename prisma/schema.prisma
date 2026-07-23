@@ -42,6 +42,11 @@ model Profile {
   avatarUrl String?  @map("avatar_url")
   role      Role     @default(USER)
   planTier  PlanTier @default(FREE) @map("plan_tier")
+  /// Sprint 18 — the Autonomous Application Engine's configurable Human
+  /// Approval policy. Defaults to the most conservative option
+  /// (`ALWAYS_ASK`) so a user who never visits the setting keeps full
+  /// manual control, never silently opted into automated submission.
+  applicationApprovalPolicy ApprovalPolicy @default(ALWAYS_ASK) @map("application_approval_policy")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
@@ -49,6 +54,7 @@ model Profile {
   resumes                     Resume[]
   opportunities               Opportunity[]
   accountConnections          AccountConnection[]
+  gmailCareerEvents           GmailCareerEvent[]
   featureUsageEvents          FeatureUsageEvent[]
   discoveryPreference         DiscoveryPreference?
   connectorPreferences        ConnectorPreference[]
@@ -58,6 +64,7 @@ model Profile {
   entitlementOverrides        EntitlementOverride[] @relation("EntitlementOverrideForUser")
   entitlementOverridesCreated EntitlementOverride[] @relation("EntitlementOverrideCreatedBy")
   recruiters                  Recruiter[]
+  referrals                   Referral[]
   careerGoal                  CareerGoal?
   learningItems               LearningItem[]
   salaryEstimates             SalaryEstimate[]
@@ -117,6 +124,15 @@ enum MeteredFeature {
   /// `CAREER_GAP_ASSESSMENT` — distinct from the dashboard's older,
   /// unmetered, ephemeral single-service LinkedIn checks).
   LINKEDIN_ANALYSIS
+  /// Sprint 16 — one Gmail Intelligence sync run (a bounded batch of new
+  /// messages classified/extracted, whether scheduled or manually
+  /// triggered), same "one run, regardless of how many items it touches"
+  /// rationale as `JOB_DISCOVERY_RUN`.
+  GMAIL_SYNC
+  /// Sprint 17 — one Calendar Intelligence sync run (read + reconcile
+  /// events, plus any real create/update/delete calls it makes for
+  /// CareerOS-owned interview events), same one-run rationale.
+  CALENDAR_SYNC
 }
 
 model FeatureUsageEvent {
@@ -201,7 +217,18 @@ model ResumeVersion {
   data      Json
   createdAt DateTime @default(now()) @map("created_at")
 
+  /// Sprint 11 — set when this version was saved from the Resume
+  /// Studio's "tailor for a saved opportunity" flow, making
+  /// "company-specific variant" a real, queryable concept instead of a
+  /// free-text label. `targetCompanyName` is a denormalized snapshot
+  /// alongside the relation (same pattern as `ApplicationSubmission.connectorSource`)
+  /// so the label stays meaningful even if the opportunity is later deleted.
+  targetOpportunityId String?      @map("target_opportunity_id") @db.Uuid
+  targetOpportunity    Opportunity? @relation(fields: [targetOpportunityId], references: [id], onDelete: SetNull)
+  targetCompanyName    String?      @map("target_company_name")
+
   applicationSubmissions ApplicationSubmission[]
+  applicationExecutions  ApplicationExecution[]
 
   @@index([resumeId])
   @@map("resume_versions")
@@ -461,6 +488,9 @@ model Opportunity {
   recruiterInteractions    RecruiterInteraction[]
   offer                    Offer?
   experienceGapAssessments ExperienceGapAssessment[]
+  targetedByResumeVersions ResumeVersion[]
+  applicationExecution     ApplicationExecution?
+  referrals                Referral[]
 
   // One saved row per distinct external listing per user — re-saving the
   // same provider listing updates it instead of duplicating it.
@@ -582,6 +612,7 @@ model ApplicationDocument {
   submissionsAsCoverLetter      ApplicationSubmission[] @relation("SubmissionCoverLetter")
   submissionsAsRecruiterMessage ApplicationSubmission[] @relation("SubmissionRecruiterMessage")
   submissionsAsEmail            ApplicationSubmission[] @relation("SubmissionEmail")
+  applicationExecutionsAsCoverLetter ApplicationExecution[]
 
   @@index([opportunityId])
   @@index([opportunityId, kind])
@@ -685,11 +716,32 @@ model InterviewNote {
   interview     Interview?  @relation(fields: [interviewId], references: [id], onDelete: SetNull)
   scheduledAt   DateTime?   @map("scheduled_at")
   note          String
+  /// Sprint 20 (Interview Intelligence) — Module 8's "Interview
+  /// Documents." Deliberately a *link*, not a hosted file: this codebase
+  /// has no attachment-upload/storage system for interview materials
+  /// (only Supabase Storage for resumes and AI-generated
+  /// `ApplicationDocument` text), and building one was out of this
+  /// sprint's scope. Reuses the existing `InterviewNote` model exactly as
+  /// documents-as-notes rather than a new model — `documentType` is
+  /// `null` for every ordinary note (unchanged behavior).
+  documentType  InterviewDocumentType? @map("document_type")
+  documentUrl   String?                @map("document_url")
   createdAt     DateTime    @default(now()) @map("created_at")
 
   @@index([opportunityId])
   @@index([interviewId])
   @@map("interview_notes")
+}
+
+/// Sprint 20 — Module 8's document categories. A note with a non-null
+/// `documentType` is a document reference (see `InterviewNote.documentUrl`'s
+/// doc comment); `documentType: null` means it's an ordinary text note.
+enum InterviewDocumentType {
+  ASSIGNMENT
+  CASE_STUDY
+  OFFER_LETTER
+  FEEDBACK
+  JOINING_DOCUMENT
 }
 
 enum ConnectionProvider {
@@ -700,10 +752,19 @@ enum ConnectionProvider {
   WELLFOUND
   APNA
   INTERNSHALA
+  /// Sprint 7 — the first provider with a real, working OAuth connector
+  /// (`features/connectors/connectors/google/`). See that connector's
+  /// doc comments for scopes/capabilities.
+  GOOGLE
+  /// Sprint 14 — the second real OAuth connector
+  /// (`features/connectors/connectors/microsoft/`), built on the same
+  /// shared OAuth2+PKCE helpers Google was refactored onto
+  /// (`features/connectors/shared/`).
+  MICROSOFT
 }
 
-/// `NOT_AVAILABLE` is the only status any row can honestly have this
-/// sprint — see the model doc comment below.
+/// `NOT_AVAILABLE` is the only status any row could honestly have before
+/// Sprint 7 — see the model doc comment below.
 enum ConnectionStatus {
   NOT_AVAILABLE
   PENDING
@@ -712,17 +773,15 @@ enum ConnectionStatus {
   ERROR
 }
 
-/// Schema-level groundwork for the Account Connections framework. No
-/// provider here has a real, officially-supported OAuth/partner API
-/// available for individual-user job-application automation today, so
-/// nothing in this sprint ever writes a row with `status` other than
-/// `NOT_AVAILABLE` — the UI says so plainly instead of offering a "Connect"
-/// button that can't actually connect anything (see
+/// Schema-level groundwork for the Account Connections framework, real as
+/// of Sprint 7 for `GOOGLE` (see `features/connectors/connectors/google/`)
+/// — every other provider here still has no real, officially-supported
+/// OAuth/partner API available for individual-user job-application
+/// automation, so those rows only ever reach `NOT_AVAILABLE` (see
 /// docs/ARCHITECTURE.md#opportunities). `accessToken`/`refreshToken` are
-/// nullable and unused today; whoever wires up the first real connector
-/// must encrypt them at rest (e.g. pgcrypto or app-level envelope
-/// encryption) before this model ever stores a live token — plaintext
-/// token columns are acceptable only while they're always null.
+/// application-level-encrypted ciphertext (`features/connectors/crypto.ts`,
+/// AES-256-GCM) before this model ever stores them — never plaintext once
+/// a row is real.
 model AccountConnection {
   id           String             @id @default(uuid()) @db.Uuid
   userId       String             @map("user_id") @db.Uuid
@@ -735,6 +794,11 @@ model AccountConnection {
   expiresAt    DateTime?          @map("expires_at")
   lastSyncedAt DateTime?          @map("last_synced_at")
   lastError    String?            @map("last_error")
+  /// Sprint 7 — which account on the external platform is connected
+  /// (e.g. a Google email/display name). Generic and connector-agnostic
+  /// so any future connector can populate it, not Google-specific.
+  externalAccountEmail String? @map("external_account_email")
+  externalAccountName  String? @map("external_account_name")
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
 
@@ -896,6 +960,97 @@ model ConnectorPreference {
   @@map("connector_preferences")
 }
 
+/// Sprint 16 (Gmail Intelligence Engine) — the deterministic-first
+/// classification `classifier.ts` assigns to one Gmail message. Mirrors
+/// the mission's own 9-value taxonomy exactly; `UNKNOWN` is a real,
+/// honest outcome (including after an AI classification attempt that
+/// still couldn't decide), never silently dropped.
+enum GmailCareerClassification {
+  INTERVIEW
+  RECRUITER
+  ASSESSMENT
+  APPLICATION_CONFIRMATION
+  OFFER
+  REJECTION
+  FOLLOW_UP
+  GENERAL_CAREER
+  UNKNOWN
+}
+
+/// One classified, structured-extraction row per Gmail message — the
+/// Gmail Intelligence Engine's persisted cache, keyed by
+/// `[userId, gmailMessageId]` so a sync run can cheaply skip messages
+/// it's already processed (Step 10's "avoid duplicate processing"/
+/// "incremental synchronization"). This is deliberately **not** a second
+/// timeline: `features/gmail-intelligence/timeline.ts` reshapes these
+/// rows into the existing `CareerEvent` shape
+/// (`features/career-agent/types.ts`) for the Career Inbox merge — this
+/// table is the structured-extraction cache underneath that reshape, the
+/// same relationship `AutomationExecution` has to `AuditLog` except this
+/// one needs real typed columns (a date, an amount, a link) that a
+/// generic `Json` metadata blob on `AuditLog` would make painful to query
+/// and index. Only `subject` and Gmail's own pre-truncated `snippet` are
+/// stored — never a full message body (Step 9).
+model GmailCareerEvent {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  gmailMessageId String @map("gmail_message_id")
+  threadId       String @map("thread_id")
+
+  classification GmailCareerClassification
+  /// True when a deterministic rule in `classifier.ts` decided this —
+  /// `false` means the AI Router was needed (Step 3: "Only use AI when
+  /// deterministic rules cannot classify").
+  classifiedByRule Boolean @default(true) @map("classified_by_rule")
+  /// A real, formula-derived score (`extractor.ts`'s `scoreConfidence`) —
+  /// never a number the AI reports directly, same "never fabricate"
+  /// discipline as every other confidence/score field in this codebase.
+  confidence Float
+
+  company     String?
+  role        String?
+  location    String?
+  /// Only set when a real date+time could be confidently parsed —
+  /// `interviewDateText` below carries the raw extracted text otherwise,
+  /// never a guessed `DateTime`.
+  interviewAt     DateTime? @map("interview_at")
+  interviewDateText String? @map("interview_date_text")
+  recruiterName   String? @map("recruiter_name")
+  recruiterEmail  String? @map("recruiter_email")
+  assessmentLink  String? @map("assessment_link")
+  /// Kept as the raw extracted text (e.g. "$120,000") rather than parsed
+  /// to a number — normalizing currency/period without real confidence
+  /// would risk fabricating a figure the email never precisely stated.
+  offerAmountText String? @map("offer_amount_text")
+  applicationId   String? @map("application_id")
+  /// Friendly platform name derived from the sender domain (e.g.
+  /// "Greenhouse", "LinkedIn") when recognized, else the raw domain.
+  source          String?
+
+  subject   String
+  snippet   String?
+  fromEmail String? @map("from_email")
+  fromName  String? @map("from_name")
+  /// Read from the message's own `labelIds` at fetch time — never
+  /// written back to Gmail (this engine never calls `messages.modify`).
+  isUnread  Boolean @default(false) @map("is_unread")
+
+  receivedAt DateTime @map("received_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  /// Sprint 17 — real back-reference: which `Interview` row (if any) was
+  /// auto-created from this email. Almost always zero or one; `[]` typed
+  /// only because Prisma relations are always lists on this side.
+  interviews Interview[]
+
+  @@unique([userId, gmailMessageId])
+  @@index([userId, receivedAt])
+  @@index([userId, classification])
+  @@map("gmail_career_events")
+}
+
 enum DiscoveryTrigger {
   MANUAL
   SCHEDULED
@@ -921,6 +1076,12 @@ model DiscoveryRun {
   /// discovered from a different source, and therefore did NOT surface as
   /// a second independent listing. See `DiscoveredListing.duplicateOfId`.
   duplicatesFound Int              @default(0) @map("duplicates_found")
+  /// Sprint 19 (Universal Opportunity Sync Engine) — real count of
+  /// already-known listings this run detected at least one real field
+  /// change on (see `features/discovery/change-detection.ts`), and real
+  /// count marked `CLOSED` because the source stopped returning them.
+  updatedJobsFound Int @default(0) @map("updated_jobs_found")
+  closedJobsFound  Int @default(0) @map("closed_jobs_found")
   /// `[{ connectorId, message }]` — a connector failing never fails the
   /// whole run (same `Promise.allSettled` discipline as
   /// `searchOpportunities`), just gets recorded here.
@@ -944,6 +1105,22 @@ enum DiscoveryDisposition {
   SAVED
   HIDDEN
   REJECTED
+}
+
+/// Sprint 19 — the Universal Opportunity Sync Engine's own per-run
+/// classification of a `DiscoveredListing`, independent of the user's
+/// `DiscoveryDisposition` above. `STALE`/`ARCHIVED` (named in the
+/// mission's own list) are deliberately *not* persisted values here —
+/// they're derived, read-time labels (`STALE` = not re-seen in a while,
+/// `ARCHIVED` = `CLOSED` for a while) computed from `lastSeenAt`/`closedAt`
+/// rather than a second source of truth that could drift out of sync
+/// with those real timestamps — same "derive, don't duplicate" discipline
+/// `features/autonomous-agent/status.ts` already established.
+enum OpportunitySyncStatus {
+  NEW
+  UPDATED
+  UNCHANGED
+  CLOSED
 }
 
 /// A job listing the discovery engine found — the pre-save candidate
@@ -1008,6 +1185,33 @@ model DiscoveredListing {
 
   savedOpportunityId String?      @unique @map("saved_opportunity_id") @db.Uuid
   savedOpportunity   Opportunity? @relation(fields: [savedOpportunityId], references: [id], onDelete: SetNull)
+
+  /// Sprint 19 (Universal Opportunity Sync Engine) — this listing's
+  /// classification as of the *most recent* sync run that saw or
+  /// evaluated it. A real, small, additive dimension alongside
+  /// `disposition` above — `disposition` is the *user's* action on the
+  /// listing (saved/hidden/rejected); `syncStatus` is the *sync engine's*
+  /// own read of whether the listing's real-world data changed. The two
+  /// are independent: a `SAVED` listing can still be `UPDATED` this run.
+  syncStatus OpportunitySyncStatus @default(NEW) @map("sync_status")
+  /// Sprint 19's *content* fingerprint (`features/discovery/fingerprint.ts`'s
+  /// `computeOpportunityFingerprint` — company/title/location/employment
+  /// type/salary/source/sourceId) — a different, complementary column from
+  /// the existing loose `fingerprint` field above (cross-source dedup
+  /// lookup key). Recomputed and compared every sync; not itself
+  /// unique-constrained (it's diagnostic/comparison data, not a lookup
+  /// key).
+  contentFingerprint String? @map("content_fingerprint")
+  /// Updated every time this exact `(source, sourceId)` reappears in a
+  /// connector's search results — the real signal `run-discovery.ts`'s
+  /// closure pass uses to infer a listing is gone from the source
+  /// (Step: "removed opportunities," "closed opportunities").
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  /// Set only by the closure pass, never by a user action — see
+  /// `run-discovery.ts`'s own doc comment on the real, disclosed
+  /// limitation of inferring closure from "stopped appearing in search
+  /// results."
+  closedAt   DateTime? @map("closed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
@@ -1123,8 +1327,118 @@ model ApplicationSubmission {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
+  /// Sprint 18 — set only when this row was created by
+  /// `features/application-engine/submission.ts` after a real
+  /// `JobConnector.apply()` call succeeded (`method: OFFICIAL_API`). Every
+  /// pre-Sprint-18 row, and every manual row created since, has this
+  /// `null` — see `ApplicationExecution`'s own doc comment.
+  applicationExecution ApplicationExecution?
+
   @@index([opportunityId])
   @@map("application_submissions")
+}
+
+/// Sprint 18 (Autonomous Application Engine) — the pipeline-stage state
+/// machine for one opportunity's automated-application attempt. Real,
+/// persisted history (Hard Lock: "Store timestamps... connector...
+/// resume version... cover letter... execution reason"), and
+/// deliberately not the same thing `ApplicationSubmission` already
+/// tracks: `ApplicationSubmission` is a record of a *completed, real*
+/// submission event (manual today; `OFFICIAL_API` the moment a real
+/// Easy-Apply connector exists), created only once, at the end.
+/// `ApplicationExecution` is the engine's own in-progress pipeline
+/// state — most rows for most users will end at `MANUAL_REQUIRED`
+/// without ever producing an `ApplicationSubmission`, since no connector
+/// registered in this codebase can officially apply yet (see
+/// `docs/connectors/CONNECTOR_CAPABILITY_MATRIX.md`). One row per
+/// opportunity (`@@unique`), updated in place with an append-only
+/// `statusHistory` — mirrors `Interview.stageHistory`/`meetingStatusHistory`'s
+/// exact convention.
+enum ApplicationExecutionStatus {
+  STARTED
+  VALIDATED
+  WAITING_APPROVAL
+  APPROVED
+  SUBMITTED
+  FAILED
+  RETRYING
+  COMPLETED
+  BLOCKED
+  MANUAL_REQUIRED
+}
+
+/// Sprint 18 — the Human Approval policy, configurable per user
+/// (`Profile.applicationApprovalPolicy`). Evaluated by
+/// `features/application-engine/approval-policy.ts`; never bypassed.
+enum ApprovalPolicy {
+  ALWAYS_ASK
+  ASK_HIGH_PRIORITY
+  AUTO_APPLY_LOW_RISK
+  NEVER_AUTO_APPLY
+}
+
+model ApplicationExecution {
+  id            String      @id @default(uuid()) @db.Uuid
+  opportunityId String      @unique @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  status        ApplicationExecutionStatus @default(STARTED)
+  statusHistory Json                       @default("[]") @map("status_history")
+
+  /// The connector *evaluated* for this opportunity's source — set even
+  /// when validation fails, so "which connector did we check" is always
+  /// visible, not just "which one succeeded."
+  connectorId       String?             @map("connector_id")
+  connectorProvider ConnectionProvider? @map("connector_provider")
+
+  /// Real reuse — never a document stored outside these two existing
+  /// systems (Hard Lock: "Never store generated documents outside
+  /// existing Resume Version system").
+  resumeVersionId String?        @map("resume_version_id") @db.Uuid
+  resumeVersion   ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+
+  coverLetterDocumentId String?              @map("cover_letter_document_id") @db.Uuid
+  coverLetterDocument   ApplicationDocument? @relation(fields: [coverLetterDocumentId], references: [id], onDelete: SetNull)
+
+  /// Snapshot of the policy in effect *when this execution ran* — a later
+  /// change to `Profile.applicationApprovalPolicy` must never retroactively
+  /// change what an already-recorded execution says happened.
+  approvalPolicySnapshot ApprovalPolicy @map("approval_policy_snapshot")
+  requiresApproval       Boolean        @default(true) @map("requires_approval")
+  approvedAt             DateTime?      @map("approved_at")
+  /// `"USER"` (a real click on Approve) or `"POLICY"` (auto-approved under
+  /// `AUTO_APPLY_LOW_RISK`) — never set without one of those two real
+  /// triggers.
+  approvedBy             String?        @map("approved_by")
+
+  /// `[{ questionId, question, suggestedAnswer }]` — AI-suggested answers
+  /// to this opportunity's real `Opportunity.customQuestions`, queued for
+  /// approval. Never written back into `customQuestions.answer` itself
+  /// (that field's own contract: "never AI-generated automatically, the
+  /// user writes the answer") — this is a separate, clearly-provisional
+  /// staging area. Empty until a connector with `supportsQuestionnaire:
+  /// true` actually exists (none do today).
+  questionnaireAnswers Json @default("[]") @map("questionnaire_answers")
+
+  applicationSubmissionId String?              @unique @map("application_submission_id") @db.Uuid
+  applicationSubmission   ApplicationSubmission? @relation(fields: [applicationSubmissionId], references: [id], onDelete: SetNull)
+
+  failureReason String? @map("failure_reason")
+  retryCount    Int     @default(0) @map("retry_count")
+  /// Human-readable — the Decision Engine's own reasons, capability
+  /// validation result, or approval outcome, whichever this row's current
+  /// `status` reflects. Always real, never invented text.
+  executionReason String @map("execution_reason")
+
+  startedAt   DateTime  @default(now()) @map("started_at")
+  submittedAt DateTime? @map("submitted_at")
+  completedAt DateTime? @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("application_executions")
 }
 
 /// One AI Application Strategy run for an Opportunity (Module 2) — what
@@ -1292,6 +1606,7 @@ model Company {
 
   opportunities Opportunity[]
   recruiters    Recruiter[]
+  referrals     Referral[]
 
   @@map("companies")
 }
@@ -1314,14 +1629,31 @@ model Recruiter {
   email       String?
   notes       String?
 
+  /// Sprint 21 (Recruiter Intelligence & Networking Operating System),
+  /// Module 4 — real, user-entered CRM classification. Neither is
+  /// derivable from existing data (unlike relationship score/health,
+  /// which `features/recruiters/scoring.ts` computes at read time), so
+  /// these are the only two genuinely new persisted fields this sprint
+  /// adds to `Recruiter`.
+  priority RecruiterPriority @default(NORMAL)
+  /// string[] — free-text tags the user assigns, never inferred.
+  tags     Json              @default("[]")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   interactions RecruiterInteraction[]
   interviews   Interview[]
+  referrals    Referral[]
 
   @@index([userId])
   @@map("recruiters")
+}
+
+enum RecruiterPriority {
+  LOW
+  NORMAL
+  HIGH
 }
 
 enum RecruiterInteractionType {
@@ -1353,6 +1685,48 @@ model RecruiterInteraction {
   @@index([recruiterId])
   @@index([opportunityId])
   @@map("recruiter_interactions")
+}
+
+/// Sprint 21, Module 5 — Referral Intelligence. Entirely user-entered,
+/// same "CareerOS has no real visibility" discipline as
+/// `RecruiterInteraction` — never inferred from a Gmail email or created
+/// automatically. `statusHistory` is the same real, append-only pattern
+/// `Interview.stageHistory`/`Interview.meetingStatusHistory` already
+/// established — only `updateReferralStatus` (`features/recruiters/
+/// referrals.ts`) writes it.
+model Referral {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  user   Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  recruiterId String?    @map("recruiter_id") @db.Uuid
+  recruiter   Recruiter? @relation(fields: [recruiterId], references: [id], onDelete: SetNull)
+
+  companyId String?  @map("company_id") @db.Uuid
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  opportunityId String?      @map("opportunity_id") @db.Uuid
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  status        ReferralStatus @default(REQUESTED)
+  statusHistory Json           @default("[]") @map("status_history")
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([recruiterId])
+  @@index([opportunityId])
+  @@map("referrals")
+}
+
+enum ReferralStatus {
+  REQUESTED
+  PENDING
+  ACCEPTED
+  REJECTED
+  COMPLETED
 }
 
 enum InterviewStage {
@@ -1398,14 +1772,100 @@ model Interview {
   /// fabricated rating.
   difficultyRating Int?      @map("difficulty_rating")
 
+  /// Sprint 17 (Calendar Intelligence & Interview Management Engine) —
+  /// the meeting's *own* lifecycle (did it happen, move, or get
+  /// cancelled), a real, separate dimension from `stage` (which round
+  /// this is). "Waiting Feedback"/"Offer Pending" etc. (the Career
+  /// Agent's Step 13 statuses) are deliberately *not* stored fields —
+  /// they're derived from `meetingStatus` + `stage` + `Offer` existence,
+  /// same "derive, don't duplicate" discipline as `AgentStatus`
+  /// (`features/autonomous-agent/status.ts`).
+  meetingStatus        InterviewMeetingStatus @default(SCHEDULED) @map("meeting_status")
+  /// Append-only, same convention as `stageHistory` — `transitionMeetingStatus`
+  /// (`features/interviews/intelligence/tracking.ts`) is the only writer.
+  meetingStatusHistory Json                   @default("[]") @map("meeting_status_history")
+  /// Real provenance — never presented as more certain than how this row
+  /// actually came to exist.
+  source InterviewSource @default(MANUAL)
+
+  /// Normalized by `features/interviews/intelligence`'s meeting-link
+  /// parser (Step 8) — the real URL, never fabricated when none was
+  /// found in the source email/calendar event.
+  meetingLink     String? @map("meeting_link")
+  /// Friendly platform label ("Google Meet", "Zoom", ...) from the same
+  /// parser — `null` when a link exists but didn't match a known
+  /// platform (still a real, generic HTTPS link).
+  meetingPlatform String? @map("meeting_platform")
+  /// IANA timezone the event's start time was actually expressed in by
+  /// the calendar provider (e.g. "America/New_York") — never guessed
+  /// from the user's own browser/profile locale.
+  timezone        String?
+
+  /// The three fields below are only ever set together, by
+  /// `features/calendar/manager.ts`'s create/sync path — a `null`
+  /// `calendarEventId` means this interview has no calendar counterpart
+  /// (e.g. Gmail-detected but no write-capable calendar connected yet).
+  calendarProvider ConnectionProvider? @map("calendar_provider")
+  calendarId       String?             @map("calendar_id")
+  calendarEventId  String?             @map("calendar_event_id")
+  /// `true` only when CareerOS itself created this calendar event via
+  /// `CalendarProviderAdapter.createEvent()` — the *only* condition
+  /// under which `updateEvent()`/`deleteEvent()` may ever be called on
+  /// it (Hard Lock 18: never write to or delete a user's own calendar
+  /// events). Real, load-bearing, checked by
+  /// `features/interviews/intelligence/calendar.ts` before every write.
+  createdByCareerOS Boolean @default(false) @map("created_by_careeros")
+
+  /// Which Gmail message (if any) this interview round was detected
+  /// from — real provenance, nullable for manually-created rows.
+  gmailCareerEventId String?           @map("gmail_career_event_id") @db.Uuid
+  gmailCareerEvent   GmailCareerEvent? @relation(fields: [gmailCareerEventId], references: [id], onDelete: SetNull)
+
+  /// Sprint 17 — computed and written only by `calendar_sync`
+  /// (`features/interviews/intelligence/sync.ts`'s real interval-overlap
+  /// check against the user's actual fetched calendar events), never
+  /// recomputed at read time (Hard Lock 7: "Calendar synchronization
+  /// NEVER happens during page render"). Mission Control's Conflict
+  /// Alerts read these two columns directly.
+  hasConflict  Boolean @default(false) @map("has_conflict")
+  conflictNote String? @map("conflict_note")
+
+  /// Sprint 20 (Interview Intelligence & Interview Operating System) —
+  /// Module 9's AI critique of the user's own free-text `feedback`
+  /// (`{ strengths: string[], weaknesses: string[], followUpAdvice:
+  /// string[], nextStageProbability: number }`), generated by the new
+  /// `analyzeInterviewFeedback` service (mirrors `analyzeAnswerFeedback`'s
+  /// existing pattern). `null` until the user has entered `feedback` and
+  /// requested an analysis — never generated from an empty note.
+  feedbackAnalysis Json? @map("feedback_analysis")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   notes InterviewNote[]
   preps InterviewPrep[]
 
+  @@unique([calendarProvider, calendarEventId])
   @@index([opportunityId])
+  @@index([gmailCareerEventId])
   @@map("interviews")
+}
+
+/// Sprint 17 — the scheduled meeting's own lifecycle, separate from
+/// `InterviewStage` (which round). See `Interview.meetingStatus`'s own
+/// doc comment.
+enum InterviewMeetingStatus {
+  SCHEDULED
+  RESCHEDULED
+  CANCELLED
+  COMPLETED
+}
+
+/// Sprint 17 — real provenance for how an `Interview` row came to exist.
+enum InterviewSource {
+  MANUAL
+  GMAIL_DETECTED
+  CALENDAR_DETECTED
 }
 
 /// One AI Interview Coach run for an Interview — new row per generation

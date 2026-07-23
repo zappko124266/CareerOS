@@ -241,3 +241,17 @@ export async function listOpportunitiesDueForFollowUp(
     .slice(0, limit)
     .map((candidate) => ({ opportunityId: candidate.id, userId: candidate.userId }));
 }
+
+/** Sprint 13 (Career Identity), Document Vault — every `ApplicationDocument`
+ * across every one of the user's opportunities, joined through
+ * `Opportunity` the same way `getOwnedApplicationDocumentOrThrow` checks
+ * ownership (no direct `userId` on this model). `listApplicationDocuments`
+ * stays per-opportunity for the workspace's Documents tab; this is the
+ * first cross-opportunity read. */
+export async function listAllApplicationDocumentsForUser(userId: string) {
+  return prisma.applicationDocument.findMany({
+    where: { opportunity: { userId } },
+    include: { opportunity: { select: { id: true, title: true, companyName: true } } },
+    orderBy: { updatedAt: "desc" },
+  });
+}

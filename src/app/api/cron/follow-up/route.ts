@@ -2,25 +2,21 @@ import { NextResponse } from "next/server";
 
 import { env } from "@/lib/env.server";
 import { logger } from "@/lib/logger";
-import { logAuditEvent } from "@/lib/audit";
-import { checkEntitlement, consumeEntitlement } from "@/features/entitlements/service";
-import { listOpportunitiesDueForFollowUp } from "@/features/applications/queries";
-import { generateFollowUpRecommendation } from "@/features/applications/service";
-
-// Same bounded-per-invocation discipline as `/api/cron/discovery` — each
-// `generateFollowUpRecommendation` call is one AI Router call and can
-// legitimately take a while (see docs/ARCHITECTURE.md#job-discovery-engine
-// for this session's observed AI Router latency, which applies to every
-// AI Router caller, not just discovery). No background job queue exists
-// in this codebase, so a single Vercel Function invocation processing an
-// unbounded list would risk the platform's execution time limit.
-const MAX_OPPORTUNITIES_PER_INVOCATION = 10;
+import { runAutomation } from "@/features/automation/engine";
 
 /**
  * Vercel Cron hits this on a schedule (see `vercel.json`) — Module 12's
  * "Background Automation" for the AI Follow-up Engine (Module 9). Also
  * callable manually with the same `CRON_SECRET` bearer token for local
  * testing/verification, same convention as `/api/cron/discovery`.
+ *
+ * Sprint 5 (Automation Engine): the due-opportunity loop this route used
+ * to run itself now lives in `features/automation/` as the
+ * `follow_up_recommendation` task. The manual follow-up trigger
+ * (`actions/application-automation.ts`) is untouched and keeps its own
+ * `follow_up.recommendation_generated` audit event; this scheduled
+ * path's execution history is now the unified `automation.task_*`
+ * events instead.
  */
 export async function GET(request: Request) {
   if (!env.CRON_SECRET) {
@@ -33,43 +29,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const now = new Date();
-  const due = await listOpportunitiesDueForFollowUp(now, MAX_OPPORTUNITIES_PER_INVOCATION);
-
-  const results: {
-    opportunityId: string;
-    status: "completed" | "skipped" | "failed";
-    detail?: string;
-  }[] = [];
-
-  for (const { opportunityId, userId } of due) {
-    const entitlement = await checkEntitlement(userId, "FOLLOW_UP_RECOMMENDATION");
-    if (!entitlement.allowed) {
-      results.push({ opportunityId, status: "skipped", detail: "entitlement limit reached" });
-      continue;
-    }
-
-    try {
-      const recommendation = await generateFollowUpRecommendation(opportunityId, userId);
-      await consumeEntitlement(userId, "FOLLOW_UP_RECOMMENDATION");
-      await logAuditEvent("follow_up.recommendation_generated", {
-        userId,
-        metadata: {
-          opportunityId,
-          recommendationType: recommendation.recommendationType,
-          trigger: "SCHEDULED",
-        },
-      });
-      results.push({ opportunityId, status: "completed" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error("follow_up_cron.run_failed", { opportunityId, userId, message });
-      results.push({ opportunityId, status: "failed", detail: message });
-    }
-  }
+  const summary = await runAutomation("follow_up_recommendation");
 
   return NextResponse.json({
-    dueCount: due.length,
-    results,
+    dueCount: summary.dueCount,
+    results: summary.results,
   });
 }

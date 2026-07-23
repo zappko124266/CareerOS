@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import {
   addInterviewNoteAction,
+  analyzeInterviewFeedbackAction,
   createInterviewAction,
   generateAnswerFeedbackAction,
   generateInterviewPrepAction,
@@ -35,7 +36,11 @@ import {
   INTERVIEW_STAGE_OFF_PATH,
   INTERVIEW_STAGE_ORDER,
 } from "@/features/interviews/types";
-import type { InterviewStage } from "@/features/interviews/types";
+import type { InterviewDocumentType, InterviewStage } from "@/features/interviews/types";
+import type { InterviewBrief } from "@/features/interviews/intelligence/brief";
+import type { OfferProbabilityResult } from "@/features/interviews/intelligence/offer-probability";
+import type { InterviewPrepTask } from "@/features/interviews/intelligence/planner-tasks";
+import type { InterviewStageProgress } from "@/features/interviews/intelligence/stage-tracker";
 import type {
   Interview,
   InterviewNote,
@@ -50,7 +55,219 @@ export type InterviewWithRelations = Interview & {
   notes: InterviewNote[];
 };
 
+/** Sprint 20 (Interview Intelligence & Interview Operating System) —
+ * computed server-side (`app/(app)/opportunities/[opportunityId]/page.tsx`)
+ * over data that page already fetches, and passed down as plain,
+ * already-serialized data — this client component never imports the
+ * (server-adjacent) derivation modules themselves. */
+export interface InterviewOperatingSystemBundle {
+  stageProgress: InterviewStageProgress;
+  prepTasks: InterviewPrepTask[];
+  brief: InterviewBrief;
+  offerProbability: OfferProbabilityResult;
+}
+
 const NO_RECRUITER_VALUE = "__none__";
+const DOCUMENT_TYPE_LABEL: Record<InterviewDocumentType, string> = {
+  ASSIGNMENT: "Assignment",
+  CASE_STUDY: "Case study",
+  OFFER_LETTER: "Offer letter",
+  FEEDBACK: "Feedback",
+  JOINING_DOCUMENT: "Joining document",
+};
+const NO_DOCUMENT_VALUE = "__note__";
+
+function StageTrackerCard({ progress }: { progress: InterviewStageProgress }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">Stage tracker</h2>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge>{INTERVIEW_STAGE_LABEL[progress.currentStage]}</Badge>
+          {progress.nextStage && (
+            <span className="text-muted-foreground">→ next: {INTERVIEW_STAGE_LABEL[progress.nextStage]}</span>
+          )}
+          <span className="text-muted-foreground">
+            {progress.daysWaiting} day{progress.daysWaiting === 1 ? "" : "s"} since last update
+          </span>
+          {progress.confidence !== null && (
+            <Badge variant="secondary">Confidence: {progress.confidence}/100</Badge>
+          )}
+        </div>
+        {progress.completedStages.length > 0 && (
+          <p className="text-muted-foreground text-xs">
+            Completed: {progress.completedStages.map((stage) => INTERVIEW_STAGE_LABEL[stage]).join(" → ")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PrepTasksCard({ tasks }: { tasks: InterviewPrepTask[] }) {
+  const doneCount = tasks.filter((task) => task.done).length;
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Preparation tasks</h2>
+          <span className="text-muted-foreground text-xs">
+            {doneCount}/{tasks.length} done
+          </span>
+        </div>
+        <ul className="flex flex-col gap-2">
+          {tasks.map((task) => (
+            <li key={task.id} className="flex items-start gap-2 text-sm">
+              <Badge variant={task.done ? "secondary" : "outline"} className="mt-0.5 shrink-0">
+                {task.done ? "Done" : "Open"}
+              </Badge>
+              <div>
+                <p className="font-medium">{task.label}</p>
+                <p className="text-muted-foreground text-xs">{task.description}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OfferProbabilityCard({ result }: { result: OfferProbabilityResult }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Offer probability</h2>
+          <Badge variant={result.probability >= 60 ? "secondary" : "outline"}>{result.probability}%</Badge>
+        </div>
+        <ul className="flex flex-col gap-1.5">
+          {result.factors.filter((factor) => factor.available).map((factor) => (
+            <li key={factor.label} className="text-sm">
+              <span className="font-medium">{factor.label}:</span>{" "}
+              <span className="text-muted-foreground">{factor.explanation}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InterviewBriefCard({ brief }: { brief: InterviewBrief }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4">
+        <h2 className="text-sm font-semibold">Interview brief</h2>
+
+        <div>
+          <p className="text-sm font-medium">{brief.company.name}</p>
+          {brief.company.summary ? (
+            <p className="text-muted-foreground mt-1 text-sm">{brief.company.summary}</p>
+          ) : (
+            <p className="text-muted-foreground mt-1 text-sm">
+              No company research generated yet — see the Company Intelligence tab.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <p className="text-sm font-medium">Resume version</p>
+            <p className="text-muted-foreground text-sm">{brief.resumeVersionUsed?.title ?? "No resume selected yet."}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium">Salary</p>
+            <p className="text-muted-foreground text-sm">
+              {brief.salary.min || brief.salary.max
+                ? `${brief.salary.currency ?? ""}${brief.salary.min ?? "?"} – ${brief.salary.max ?? "?"}`
+                : "Not listed."}
+            </p>
+          </div>
+        </div>
+
+        {brief.resumeWeaknesses.length > 0 && (
+          <div>
+            <p className="text-sm font-medium">Resume gaps for this role</p>
+            <ul className="mt-1.5 flex flex-col gap-1">
+              {brief.resumeWeaknesses.map((gap) => (
+                <li key={gap.requirement} className="text-sm">
+                  <Badge variant="outline" className="mr-1.5">
+                    {gap.severity}
+                  </Badge>
+                  {gap.requirement}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {(brief.likelyQuestions.behavioral.length > 0 || brief.likelyQuestions.technical.length > 0) && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {brief.likelyQuestions.technical.length > 0 && (
+              <div>
+                <p className="text-sm font-medium">Likely technical questions</p>
+                <ul className="mt-1.5 list-disc pl-5 text-sm">
+                  {brief.likelyQuestions.technical.map((q) => (
+                    <li key={q.question}>{q.question}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {brief.likelyQuestions.behavioral.length > 0 && (
+              <div>
+                <p className="text-sm font-medium">Likely behavioral questions</p>
+                <ul className="mt-1.5 list-disc pl-5 text-sm">
+                  {brief.likelyQuestions.behavioral.map((q) => (
+                    <li key={q.question}>{q.question}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {brief.starStories.length > 0 && (
+          <div>
+            <p className="text-sm font-medium">STAR talking points</p>
+            <ul className="mt-1.5 list-disc pl-5 text-sm">
+              {brief.starStories.map((point) => (
+                <li key={point}>{point}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {brief.peopleInvolved.length > 0 && (
+          <div>
+            <p className="text-sm font-medium">People involved</p>
+            <p className="text-muted-foreground text-sm">
+              {brief.peopleInvolved.map((person) => `${person.name} (${person.role})`).join(", ")}
+            </p>
+          </div>
+        )}
+
+        {brief.documents.length > 0 && (
+          <div>
+            <p className="text-sm font-medium">Documents</p>
+            <ul className="mt-1.5 flex flex-col gap-1">
+              {brief.documents.map((doc) => (
+                <li key={doc.documentUrl} className="text-sm">
+                  <a href={doc.documentUrl} target="_blank" rel="noreferrer noopener" className="hover:underline">
+                    <Badge variant="outline" className="mr-1.5">
+                      {DOCUMENT_TYPE_LABEL[doc.documentType as InterviewDocumentType] ?? doc.documentType}
+                    </Badge>
+                    {doc.note}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function InterviewPrepPanel({
   interviewId,
@@ -243,15 +460,23 @@ export function InterviewWorkspacePanel({
   interviews: initialInterviews,
   recruiters,
   offer: initialOffer,
+  interviewOS,
 }: {
   opportunityId: string;
   interviews: InterviewWithRelations[];
   recruiters: Recruiter[];
   offer: Offer | null;
+  /** Sprint 20 (Interview Intelligence & Interview Operating System) —
+   * `null` until the first interview round is started, same rule as
+   * `interview` below. */
+  interviewOS: InterviewOperatingSystemBundle | null;
 }) {
   const [interviews, setInterviews] = useState(initialInterviews);
   const [offer, setOffer] = useState(initialOffer);
   const [note, setNote] = useState("");
+  const [documentType, setDocumentType] = useState<string>(NO_DOCUMENT_VALUE);
+  const [documentUrl, setDocumentUrl] = useState("");
+  const [feedback, setFeedback] = useState(initialInterviews[0]?.feedback ?? "");
   const [baseSalary, setBaseSalary] = useState(initialOffer?.baseSalary?.toString() ?? "");
   const [bonus, setBonus] = useState(initialOffer?.bonus?.toString() ?? "");
   const [currency, setCurrency] = useState(initialOffer?.currency ?? "");
@@ -261,6 +486,8 @@ export function InterviewWorkspacePanel({
   const updateAction = useAsyncAction(updateInterviewAction);
   const noteAction = useAsyncAction(addInterviewNoteAction);
   const offerAction = useAsyncAction(upsertOfferAction);
+  const feedbackSaveAction = useAsyncAction(updateInterviewAction);
+  const feedbackAnalyzeAction = useAsyncAction(analyzeInterviewFeedbackAction);
 
   const interview = interviews[0] ?? null;
 
@@ -309,15 +536,47 @@ export function InterviewWorkspacePanel({
 
   async function handleAddNote() {
     if (!interview || !note.trim()) return;
-    const result = await noteAction.run({ opportunityId, interviewId: interview.id, note: note.trim() });
+    const isDocument = documentType !== NO_DOCUMENT_VALUE;
+    if (isDocument && !documentUrl.trim()) return;
+    const result = await noteAction.run({
+      opportunityId,
+      interviewId: interview.id,
+      note: note.trim(),
+      documentType: isDocument ? (documentType as InterviewDocumentType) : undefined,
+      documentUrl: isDocument ? documentUrl.trim() : undefined,
+    });
     if (result) {
       setInterviews((prev) =>
         prev.map((i) => (i.id === interview.id ? { ...i, notes: [result, ...i.notes] } : i)),
       );
       setNote("");
-      toast.success("Note added");
+      setDocumentType(NO_DOCUMENT_VALUE);
+      setDocumentUrl("");
+      toast.success(isDocument ? "Document added" : "Note added");
     } else if (noteAction.error) {
       toast.error(noteAction.error);
+    }
+  }
+
+  async function handleSaveFeedback() {
+    if (!interview) return;
+    const result = await feedbackSaveAction.run({ interviewId: interview.id, feedback: feedback.trim() || null });
+    if (result) {
+      setInterviews((prev) => prev.map((i) => (i.id === result.id ? { ...i, ...result } : i)));
+      toast.success("Feedback saved");
+    } else if (feedbackSaveAction.error) {
+      toast.error(feedbackSaveAction.error);
+    }
+  }
+
+  async function handleAnalyzeFeedback() {
+    if (!interview) return;
+    const result = await feedbackAnalyzeAction.run({ interviewId: interview.id });
+    if (result) {
+      setInterviews((prev) => prev.map((i) => (i.id === result.id ? { ...i, ...result } : i)));
+      toast.success("Feedback analyzed");
+    } else if (feedbackAnalyzeAction.error) {
+      toast.error(feedbackAnalyzeAction.error);
     }
   }
 
@@ -425,32 +684,65 @@ export function InterviewWorkspacePanel({
           </div>
 
           <div className="flex flex-col gap-2 border-t pt-3">
-            <p className="text-sm font-medium">Notes</p>
+            <p className="text-sm font-medium">Notes &amp; documents</p>
             {interview.notes.length === 0 ? (
               <p className="text-muted-foreground text-sm">No notes yet.</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {interview.notes.map((n) => (
                   <li key={n.id} className="border-border border-l-2 pl-3 text-sm">
-                    <p className="wrap-break-word">{n.note}</p>
+                    {n.documentType && (
+                      <Badge variant="outline" className="mb-1">
+                        {DOCUMENT_TYPE_LABEL[n.documentType]}
+                      </Badge>
+                    )}
+                    <p className="wrap-break-word">
+                      {n.documentUrl ? (
+                        <a href={n.documentUrl} target="_blank" rel="noreferrer noopener" className="hover:underline">
+                          {n.note}
+                        </a>
+                      ) : (
+                        n.note
+                      )}
+                    </p>
                     <p className="text-muted-foreground text-xs">{formatRelativeTime(new Date(n.createdAt))}</p>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Select value={documentType} onValueChange={setDocumentType}>
+                <SelectTrigger className="w-full sm:w-44" aria-label="Document type">
+                  <SelectValue placeholder="Note" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_DOCUMENT_VALUE}>Plain note</SelectItem>
+                  {Object.entries(DOCUMENT_TYPE_LABEL).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input
                 placeholder="Add a note…"
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleAddNote();
-                  }
-                }}
               />
-              <Button onClick={handleAddNote} disabled={noteAction.isPending || !note.trim()} variant="outline">
+              {documentType !== NO_DOCUMENT_VALUE && (
+                <Input
+                  placeholder="Document URL…"
+                  value={documentUrl}
+                  onChange={(event) => setDocumentUrl(event.target.value)}
+                />
+              )}
+              <Button
+                onClick={handleAddNote}
+                disabled={
+                  noteAction.isPending || !note.trim() || (documentType !== NO_DOCUMENT_VALUE && !documentUrl.trim())
+                }
+                variant="outline"
+              >
                 Add
               </Button>
             </div>
@@ -458,7 +750,91 @@ export function InterviewWorkspacePanel({
         </CardContent>
       </Card>
 
+      {interviewOS && <StageTrackerCard progress={interviewOS.stageProgress} />}
+      {interviewOS && <PrepTasksCard tasks={interviewOS.prepTasks} />}
+      {interviewOS && <OfferProbabilityCard result={interviewOS.offerProbability} />}
+      {interviewOS && <InterviewBriefCard brief={interviewOS.brief} />}
+
       <InterviewPrepPanel interviewId={interview.id} prep={interview.preps[0]} />
+
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <div>
+            <h2 className="text-sm font-semibold">Post-interview feedback</h2>
+            <p className="text-muted-foreground text-sm">
+              Your own notes on how the round went — CareerOS can critique them once you save.
+            </p>
+          </div>
+          <Textarea
+            placeholder="How did it go? What questions came up, how did you answer, any signals from the interviewer…"
+            rows={4}
+            value={feedback}
+            onChange={(event) => setFeedback(event.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSaveFeedback} disabled={feedbackSaveAction.isPending} size="sm" variant="outline">
+              {feedbackSaveAction.isPending ? "Saving…" : "Save feedback"}
+            </Button>
+            <Button
+              onClick={handleAnalyzeFeedback}
+              disabled={feedbackAnalyzeAction.isPending || !interview.feedback?.trim()}
+              size="sm"
+            >
+              {feedbackAnalyzeAction.isPending ? "Analyzing…" : "Analyze feedback"}
+            </Button>
+          </div>
+          {feedbackAnalyzeAction.error && <p className="text-destructive text-sm">{feedbackAnalyzeAction.error}</p>}
+          {interview.feedbackAnalysis && (
+            <div className="flex flex-col gap-3 border-t pt-3 text-sm">
+              {(() => {
+                const analysis = interview.feedbackAnalysis as unknown as {
+                  strengths: string[];
+                  weaknesses: string[];
+                  followUpAdvice: string[];
+                  nextStageProbability: number;
+                };
+                return (
+                  <>
+                    <Badge variant="secondary" className="w-fit">
+                      Next-stage probability: {analysis.nextStageProbability}/100
+                    </Badge>
+                    {analysis.strengths.length > 0 && (
+                      <div>
+                        <p className="font-medium">Strengths</p>
+                        <ul className="mt-1 list-disc pl-5">
+                          {analysis.strengths.map((s) => (
+                            <li key={s}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {analysis.weaknesses.length > 0 && (
+                      <div>
+                        <p className="font-medium">Weaknesses</p>
+                        <ul className="mt-1 list-disc pl-5">
+                          {analysis.weaknesses.map((w) => (
+                            <li key={w}>{w}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {analysis.followUpAdvice.length > 0 && (
+                      <div>
+                        <p className="font-medium">Follow-up advice</p>
+                        <ul className="mt-1 list-disc pl-5">
+                          {analysis.followUpAdvice.map((a) => (
+                            <li key={a}>{a}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {(interview.stage === "OFFER" || interview.stage === "ACCEPTED" || offer) && (
         <Card>

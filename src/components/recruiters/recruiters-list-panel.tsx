@@ -13,20 +13,31 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAsyncAction } from "@/hooks/use-async-action";
-import { RECRUITER_INTERACTION_TYPE_LABEL } from "@/features/recruiters/types";
-import type { RecruiterInteractionType } from "@/features/recruiters/types";
-import type { Recruiter, RecruiterInteraction } from "@/generated/prisma/client";
+import { RECRUITER_INTERACTION_TYPE_LABEL, RECRUITER_PRIORITY_LABEL } from "@/features/recruiters/types";
+import { RELATIONSHIP_HEALTH_LABEL } from "@/features/recruiters/scoring";
+import type { EnrichedRecruiter } from "@/features/recruiters/orchestrator";
 
-type RecruiterWithSummary = Recruiter & {
-  company: { id: string; name: string } | null;
-  interactions: RecruiterInteraction[];
-  _count: { interactions: number };
+const HEALTH_BADGE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  STRONG: "secondary",
+  HEALTHY: "secondary",
+  WARM: "outline",
+  COOLING: "outline",
+  COLD: "destructive",
+  GHOSTED: "destructive",
+  INACTIVE: "outline",
 };
 
+/**
+ * The Networking CRM — Sprint 21, Module 4/11. Extends the existing
+ * `/recruiters` list (originally a bare name/title/notes CRM) with real,
+ * deterministically-computed relationship health and score
+ * (`features/recruiters/{scoring,orchestrator}.ts`) — never a second
+ * recruiter list.
+ */
 export function RecruitersListPanel({
   recruiters: initialRecruiters,
 }: {
-  recruiters: RecruiterWithSummary[];
+  recruiters: EnrichedRecruiter[];
 }) {
   const [recruiters, setRecruiters] = useState(initialRecruiters);
   const [name, setName] = useState("");
@@ -38,7 +49,18 @@ export function RecruitersListPanel({
     const result = await createAction.run({ name: name.trim(), title: title.trim() || undefined });
     if (result) {
       setRecruiters((prev) => [
-        { ...result, company: null, interactions: [], _count: { interactions: 0 } },
+        {
+          ...result,
+          company: null,
+          interactions: [],
+          interviews: [],
+          relationship: { score: 30, responseRate: null, factors: [] },
+          health: "INACTIVE",
+          firstContact: null,
+          lastContact: null,
+          daysSinceLastInteraction: null,
+          connectedOpportunityIds: [],
+        },
         ...prev,
       ]);
       setName("");
@@ -55,7 +77,8 @@ export function RecruitersListPanel({
         <h1 className="text-2xl font-semibold tracking-tight">Recruiters</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Every interaction here is something you told CareerOS happened — real, self-reported
-          career memory, never inferred.
+          career memory, never inferred. Relationship health and score are computed deterministically
+          from that same real history.
         </p>
       </div>
 
@@ -89,31 +112,51 @@ export function RecruitersListPanel({
         />
       ) : (
         <div className="flex flex-col gap-2">
-          {recruiters.map((recruiter) => (
-            <Card key={recruiter.id}>
-              <CardContent className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <p className="wrap-break-word text-sm font-medium">{recruiter.name}</p>
-                  <p className="text-muted-foreground wrap-break-word text-xs">
-                    {[recruiter.title, recruiter.company?.name].filter(Boolean).join(" · ") || "No details yet"}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {recruiter.interactions[0] && (
-                    <Badge variant="secondary">
-                      {RECRUITER_INTERACTION_TYPE_LABEL[recruiter.interactions[0].type as RecruiterInteractionType]}
+          {recruiters.map((recruiter) => {
+            const tags = Array.isArray(recruiter.tags) ? (recruiter.tags as string[]) : [];
+            return (
+              <Card key={recruiter.id}>
+                <CardContent className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+                  <div className="min-w-0">
+                    <p className="wrap-break-word text-sm font-medium">
+                      {recruiter.name}
+                      {recruiter.priority === "HIGH" && (
+                        <Badge variant="outline" className="ml-1.5">
+                          {RECRUITER_PRIORITY_LABEL[recruiter.priority]}
+                        </Badge>
+                      )}
+                    </p>
+                    <p className="text-muted-foreground wrap-break-word text-xs">
+                      {[recruiter.title, recruiter.company?.name].filter(Boolean).join(" · ") || "No details yet"}
+                    </p>
+                    {tags.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {tags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge variant={HEALTH_BADGE_VARIANT[recruiter.health] ?? "outline"}>
+                      {RELATIONSHIP_HEALTH_LABEL[recruiter.health]}
                     </Badge>
-                  )}
-                  <span className="text-muted-foreground text-xs">
-                    {recruiter._count.interactions} interaction{recruiter._count.interactions === 1 ? "" : "s"}
-                  </span>
-                  <Button asChild size="sm" variant="outline">
-                    <Link href={`/recruiters/${recruiter.id}`}>View</Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                    <span className="text-muted-foreground text-xs">{recruiter.relationship.score}/100</span>
+                    {recruiter.interactions[0] && (
+                      <Badge variant="secondary">
+                        {RECRUITER_INTERACTION_TYPE_LABEL[recruiter.interactions[0].type]}
+                      </Badge>
+                    )}
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/recruiters/${recruiter.id}`}>View</Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

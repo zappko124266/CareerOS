@@ -1,6 +1,7 @@
 import "server-only";
 
 import { researchCompany } from "@/features/career-intelligence/companies";
+import { buildRecruiterIntelligenceSummary } from "@/features/recruiters/orchestrator";
 import { ValidationError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import type { Company } from "@/generated/prisma/client";
@@ -145,10 +146,31 @@ export async function ensureOpportunityCompanyId(
   return company.id;
 }
 
-export async function getCompanyIntelligence(companyId: string): Promise<CompanyIntelligence> {
+/** Sprint 21, Module 14 — `userId` is optional so every existing caller
+ * that only needs the shared `company`/`aggregates` data keeps compiling
+ * unchanged; the one caller that renders the workspace page passes it to
+ * get real, this-user's-own `recruiters` back too. */
+export async function getCompanyIntelligence(companyId: string, userId?: string): Promise<CompanyIntelligence> {
   const company = await getOwnedCompanyOrThrow(companyId);
-  const aggregates = await getCompanyAggregates(companyId);
-  return { company, aggregates };
+  const [aggregates, recruiters, referrals] = await Promise.all([
+    getCompanyAggregates(companyId),
+    userId
+      ? prisma.recruiter.findMany({
+          where: { userId, companyId },
+          include: {
+            company: { select: { id: true, name: true } },
+            interactions: { orderBy: { occurredAt: "desc" } },
+            interviews: { select: { id: true, opportunityId: true, stage: true, scheduledAt: true } },
+          },
+          orderBy: { updatedAt: "desc" },
+        })
+      : Promise.resolve([]),
+    userId ? prisma.referral.findMany({ where: { userId, companyId } }) : Promise.resolve([]),
+  ]);
+
+  const enrichedRecruiters = recruiters.length > 0 ? buildRecruiterIntelligenceSummary(recruiters, referrals).recruiters : [];
+
+  return { company, aggregates, recruiters: enrichedRecruiters };
 }
 
 /** Module 7 — Company Research. Grounded ONLY in real job-description

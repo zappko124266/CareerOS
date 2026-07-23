@@ -86,16 +86,17 @@ export async function saveResumeDraftAction(
 export async function createResumeVersionAction(
   resumeId: string,
   label: string,
+  target?: { opportunityId: string; companyName: string },
 ): Promise<DataActionResult<ResumeVersion>> {
   const user = await verifySession();
 
   const trimmedLabel = label.trim() || "Untitled version";
 
   try {
-    const version = await createResumeVersion(resumeId, user.id, trimmedLabel);
+    const version = await createResumeVersion(resumeId, user.id, trimmedLabel, target);
     await logAuditEvent("resume.version_created", {
       userId: user.id,
-      metadata: { resumeId, versionId: version.id },
+      metadata: { resumeId, versionId: version.id, targetOpportunityId: target?.opportunityId },
     });
     revalidatePath(`/resume/${resumeId}/studio`);
     return { status: "success", data: version };

@@ -20,6 +20,8 @@ export const METERED_FEATURES = [
   "OFFER_COMPARISON",
   "CAREER_GAP_ASSESSMENT",
   "LINKEDIN_ANALYSIS",
+  "GMAIL_SYNC",
+  "CALENDAR_SYNC",
 ] as const;
 export type MeteredFeature = (typeof METERED_FEATURES)[number];
 

@@ -3,6 +3,7 @@ import "server-only";
 import { getApplicationResumeText } from "@/features/applications/service";
 import {
   analyzeAnswerFeedback,
+  analyzeInterviewFeedback,
   analyzeInterviewReadiness,
 } from "@/features/career-intelligence/interview";
 import { analyzeCompanyMatch } from "@/features/career-intelligence/jobs";
@@ -19,6 +20,7 @@ import {
 import type {
   AddInterviewNoteInput,
   CreateInterviewInput,
+  InterviewFeedbackAnalysis,
   InterviewStage,
   OfferComparisonResult,
   UpdateInterviewInput,
@@ -193,7 +195,40 @@ export async function addInterviewNote(userId: string, input: AddInterviewNoteIn
       interviewId: input.interviewId,
       note: input.note,
       scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
+      documentType: input.documentType,
+      documentUrl: input.documentUrl,
     },
+  });
+}
+
+/** Module 9 — Interview Feedback Intelligence. Requires the user to have
+ * already entered `feedback` on this interview (via `updateInterview`) —
+ * never analyzes an empty note. Reuses the new `analyzeInterviewFeedback`
+ * Career Intelligence service (same `createAnalysisService` factory every
+ * other AI Router call in this module goes through) and persists the
+ * result onto the interview itself, same "new row vs. in-place update"
+ * judgment as `updateInterview` (a feedback note is edited in place, not
+ * versioned like `InterviewPrep`). */
+export async function analyzeInterviewFeedbackForInterview(
+  userId: string,
+  interviewId: string,
+): Promise<Interview> {
+  const interview = await getOwnedInterviewOrThrow(interviewId, userId);
+  if (!interview.feedback?.trim()) {
+    throw new ValidationError("Add your interview feedback notes before requesting an analysis.");
+  }
+
+  const result = await analyzeInterviewFeedback({
+    roundLabel: interview.roundLabel ?? undefined,
+    jobDescription: interview.opportunity.description,
+    feedback: interview.feedback,
+  });
+
+  const feedbackAnalysis: InterviewFeedbackAnalysis = result;
+
+  return prisma.interview.update({
+    where: { id: interviewId },
+    data: { feedbackAnalysis: feedbackAnalysis as unknown as Prisma.InputJsonValue },
   });
 }
 

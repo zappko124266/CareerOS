@@ -215,6 +215,13 @@ export async function createResumeVersion(
   resumeId: string,
   userId: string,
   label: string,
+  /** Sprint 11 — set when this version was saved from the Resume Studio's
+   * "tailor for a saved opportunity" flow, making "company-specific
+   * variant" a real, queryable concept. `targetCompanyName` is a
+   * denormalized snapshot alongside the relation (same pattern as
+   * `ApplicationSubmission.connectorSource`) so the label stays
+   * meaningful even if the opportunity is later deleted. */
+  target?: { opportunityId: string; companyName: string },
 ) {
   const resume = await getOwnedResumeOrThrow(resumeId, userId);
 
@@ -225,7 +232,13 @@ export async function createResumeVersion(
   }
 
   return prisma.resumeVersion.create({
-    data: { resumeId, label, data: resume.parsedData },
+    data: {
+      resumeId,
+      label,
+      data: resume.parsedData,
+      targetOpportunityId: target?.opportunityId,
+      targetCompanyName: target?.companyName,
+    },
   });
 }
 

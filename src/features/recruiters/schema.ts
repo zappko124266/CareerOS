@@ -11,6 +11,9 @@ export const RecruiterInteractionTypeSchema = z.enum([
   "HIRED",
 ]);
 
+/** Mirrors `RecruiterPriority` in `prisma/schema.prisma`. */
+export const RecruiterPrioritySchema = z.enum(["LOW", "NORMAL", "HIGH"]);
+
 export const CreateRecruiterInputSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200),
   companyId: z.uuid().optional(),
@@ -18,10 +21,31 @@ export const CreateRecruiterInputSchema = z.object({
   linkedinUrl: z.string().trim().max(500).optional(),
   email: z.string().trim().max(300).optional(),
   notes: z.string().trim().max(2000).optional(),
+  priority: RecruiterPrioritySchema.optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
 });
 
 export const UpdateRecruiterInputSchema = CreateRecruiterInputSchema.extend({
   recruiterId: z.uuid(),
+});
+
+/// Mirrors `ReferralStatus` in `prisma/schema.prisma`.
+export const ReferralStatusSchema = z.enum(["REQUESTED", "PENDING", "ACCEPTED", "REJECTED", "COMPLETED"]);
+
+export const CreateReferralInputSchema = z.object({
+  recruiterId: z.uuid().optional(),
+  companyId: z.uuid().optional(),
+  opportunityId: z.uuid().optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export const UpdateReferralStatusInputSchema = z.object({
+  referralId: z.uuid(),
+  status: ReferralStatusSchema,
+});
+
+export const DeleteReferralInputSchema = z.object({
+  referralId: z.uuid(),
 });
 
 export const DeleteRecruiterInputSchema = z.object({

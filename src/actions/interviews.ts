@@ -9,6 +9,7 @@ import { logAuditEvent } from "@/lib/audit";
 import { checkEntitlement, consumeEntitlement } from "@/features/entitlements/service";
 import {
   addInterviewNote,
+  analyzeInterviewFeedbackForInterview,
   compareOffers,
   createInterview,
   deleteOffer,
@@ -20,6 +21,7 @@ import {
 } from "@/features/interviews/service";
 import {
   AddInterviewNoteInputSchema,
+  AnalyzeInterviewFeedbackInputSchema,
   CompareOffersInputSchema,
   CreateInterviewInputSchema,
   DeleteOfferInputSchema,
@@ -182,6 +184,38 @@ export async function generateAnswerFeedbackAction(
     return { status: "success", data: prep };
   } catch (error) {
     return toActionError(error, "We couldn't critique that answer right now.");
+  }
+}
+
+export async function analyzeInterviewFeedbackAction(
+  input: unknown,
+): Promise<DataActionResult<Interview>> {
+  const user = await verifySession();
+
+  const parsed = AnalyzeInterviewFeedbackInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "That request wasn't valid." };
+  }
+
+  const entitlement = await checkEntitlement(user.id, "INTERVIEW_PREP");
+  if (!entitlement.allowed) {
+    return {
+      status: "error",
+      message: `You've used all ${entitlement.limit} free interview coach runs this month. This resets monthly — the Pro plan removes the limit.`,
+    };
+  }
+
+  try {
+    const interview = await analyzeInterviewFeedbackForInterview(user.id, parsed.data.interviewId);
+    await consumeEntitlement(user.id, "INTERVIEW_PREP");
+    await logAuditEvent("interview_feedback.analyzed", {
+      userId: user.id,
+      metadata: { interviewId: parsed.data.interviewId },
+    });
+    revalidatePath(`/opportunities/${interview.opportunityId}`);
+    return { status: "success", data: interview };
+  } catch (error) {
+    return toActionError(error, "We couldn't analyze that feedback right now.");
   }
 }
 

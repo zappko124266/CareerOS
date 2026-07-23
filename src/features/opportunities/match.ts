@@ -1,3 +1,5 @@
+import type { ResumeCertification, ResumeEducation } from "@/features/resume/schema";
+
 export interface MatchInput {
   title: string;
   location: string | null;
@@ -27,6 +29,13 @@ export interface ResumeMatchProfile {
   /** Most recent role title, if any experience entries exist. */
   currentTitle: string | null;
   location: string | null;
+  /** Sprint 4 (Career Brain — Resume Intelligence). Additive fields from
+   * the same already-parsed resume `getResumeMatchProfile` builds this
+   * from — no new query or parse. `computeMatch` below never reads
+   * these; they exist purely for Resume Intelligence to reuse this one
+   * parse instead of re-parsing the resume a second time. */
+  education: ResumeEducation[];
+  certifications: ResumeCertification[];
 }
 
 function normalize(value: string): string {

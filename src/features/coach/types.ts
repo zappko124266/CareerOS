@@ -1,5 +1,7 @@
 import type { ActivityItem } from "@/features/dashboard/types";
 import type { AvailabilityWindow, SearchPriority } from "@/features/discovery/types";
+import type { ResumeMatchProfile } from "@/features/opportunities/match";
+import type { Opportunity, ResumeAnalysis } from "@/generated/prisma/client";
 import type { UserDTO } from "@/lib/auth/dto";
 
 import type { NextStep } from "./recommend-next-step";
@@ -24,12 +26,12 @@ export type CoachIntent =
   | "unknown";
 
 /**
- * Output of the classification step (the "AI Integration Layer" from
- * `analyze-message.ts`). `confidence`/`reason` are deterministic today —
- * tied to *how* a match was made (keyword vs none) rather than a
- * fabricated probability — and are exactly the fields a model-backed
- * classifier would fill with real output later, without changing this
- * shape.
+ * Output of the classification step (the Decision Engine, Sprint 8's
+ * `features/ai/decision-engine.ts`). `confidence`/`reason` are
+ * deterministic today — tied to *how* a match was made (keyword vs none)
+ * rather than a fabricated probability — and are exactly the fields a
+ * model-backed classifier would fill with real output later, without
+ * changing this shape.
  */
 export interface ClassifierResult {
   intent: CoachIntent;
@@ -88,6 +90,11 @@ export interface CoachContext {
   resumeAnalysis: {
     hasAnalysis: boolean;
     latestScore: number | null;
+    /** Sprint 3 (Career Agent) — the full row, not just the score:
+     * `buildBriefing` needs the `breakdown` JSON, and exposing it here
+     * lets the dashboard stop calling `getDashboardData` a second time
+     * just to get this same object. */
+    latest: ResumeAnalysis | null;
   };
   linkedIn: {
     hasAnalysis: boolean;
@@ -104,10 +111,20 @@ export interface CoachContext {
   };
   jobs: {
     savedCount: number;
+    /** Sprint 3 (Career Agent) — the raw rows already fetched via
+     * `listOpportunitiesForUser` to compute `savedCount`/`hired.achieved`
+     * above; exposed so the Career Agent's Priority Queue can reuse them
+     * instead of re-querying. */
+    opportunities: Opportunity[];
   };
   dashboard: {
     recentActivity: ActivityItem[];
   };
+  /** Sprint 3 (Career Agent) — the user's parsed-resume profile, reused
+   * by the Opportunity Intelligence Engine (`features/opportunities/intelligence.ts`)
+   * for the Recommended Opportunities widget. `null` when no resume has
+   * been parsed yet. */
+  resumeProfile: ResumeMatchProfile | null;
   /** Whether any saved opportunity has reached `JOINED` — derived from the
    * same opportunity list already fetched for `jobs.savedCount`, no extra
    * query. Powers the Roadmap's "Hired" milestone. */
@@ -143,10 +160,10 @@ export interface ConversationTurn {
 export type CoachTone = "encouraging" | "professional" | "direct";
 
 /**
- * Everything the Conversation Generator (`generate-response.ts`) decides
- * *deterministically*, alongside the AI-generated `message` text. `cta`
- * is a direct pass-through of `OrchestrationResult.cta` — the model never
- * decides it (Step 8: the Orchestrator remains the source of truth).
+ * Everything the Response Builder (Sprint 8's `features/ai/response-builder.ts`)
+ * decides *deterministically*, alongside the AI-generated `message` text.
+ * `cta` is a direct pass-through of `OrchestrationResult.cta` — the model
+ * never decides it (the Orchestrator remains the source of truth).
  */
 export interface CoachResponseMeta {
   cta: CoachCta;

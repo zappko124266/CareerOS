@@ -65,9 +65,30 @@ export const CompareOffersInputSchema = z.object({
   opportunityIds: z.array(z.uuid()).min(2).max(5),
 });
 
+/** Sprint 20 — Module 8, "Interview Documents." `documentType` set means
+ * this note is a document reference (`documentUrl` required); unset
+ * means it's an ordinary text note — the exact same existing write path,
+ * just two optional fields wider. */
+export const InterviewDocumentTypeSchema = z.enum([
+  "ASSIGNMENT",
+  "CASE_STUDY",
+  "OFFER_LETTER",
+  "FEEDBACK",
+  "JOINING_DOCUMENT",
+]);
+
 export const AddInterviewNoteInputSchema = z.object({
   opportunityId: z.uuid(),
   interviewId: z.uuid().optional(),
   note: z.string().trim().min(1, "Note can't be empty").max(4000),
   scheduledAt: z.iso.datetime().optional(),
+  documentType: InterviewDocumentTypeSchema.optional(),
+  documentUrl: z.url().max(2000).optional(),
+});
+
+/** Sprint 20 — Module 9, Interview Feedback Intelligence. Requires
+ * `Interview.feedback` to already be set (enforced in the service, not
+ * here) — this only validates which interview to analyze. */
+export const AnalyzeInterviewFeedbackInputSchema = z.object({
+  interviewId: z.uuid(),
 });

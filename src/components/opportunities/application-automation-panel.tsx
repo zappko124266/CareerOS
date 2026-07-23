@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Circle, Clock, Send, Sparkles } from "lucide-react";
+import { CheckCircle2, Circle, Clock, ListPlus, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -34,6 +34,7 @@ import {
 } from "@/features/applications/types";
 import type { SubmissionMethod } from "@/features/applications/types";
 import { STRATEGY_FACTOR_ORDER } from "@/features/applications/format";
+import type { Checklist } from "@/features/opportunities/types";
 import type {
   ApplicationDocument,
   ApplicationSubmission,
@@ -65,12 +66,20 @@ export function ApplicationAutomationPanel({
   latestStrategy,
   latestFollowUp,
   submissions,
+  checklist,
+  onChecklistChange,
 }: {
   opportunity: Opportunity;
   applicationDocuments: ApplicationDocument[];
   latestStrategy: ApplicationStrategyOutput | null;
   latestFollowUp: FollowUpRecommendation | null;
   submissions: ApplicationSubmission[];
+  /** Sprint 12 (Job Studio), requirement 7 — the Documents tab's
+   * checklist, threaded here so the Strategy card's "still needs doing"
+   * factors can seed it directly instead of the user retyping what the
+   * AI already told them. */
+  checklist: Checklist;
+  onChecklistChange: (checklist: Checklist) => void;
 }) {
   const [strategy, setStrategy] = useState(latestStrategy);
   const [followUp, setFollowUp] = useState(latestFollowUp);
@@ -108,6 +117,23 @@ export function ApplicationAutomationPanel({
     } else if (followUpAction.error) {
       toast.error(followUpAction.error);
     }
+  }
+
+  function handleAddToChecklist() {
+    if (!strategy) return;
+    const existingLabels = new Set(checklist.map((item) => item.label));
+    const newItems = STRATEGY_FACTOR_ORDER.filter((key) => strategy.factors[key].value)
+      .map((key) => STRATEGY_FACTOR_LABEL[key])
+      .filter((label) => !existingLabels.has(label))
+      .map((label) => ({ id: crypto.randomUUID(), label, done: false }));
+
+    if (newItems.length === 0) {
+      toast("Nothing new to add — your checklist already covers it.");
+      return;
+    }
+
+    onChecklistChange([...checklist, ...newItems]);
+    toast.success(`Added ${newItems.length} item${newItems.length === 1 ? "" : "s"} to your checklist`);
   }
 
   async function handleRecordSubmission() {
@@ -178,6 +204,10 @@ export function ApplicationAutomationPanel({
                   />
                 ))}
               </div>
+              <Button onClick={handleAddToChecklist} size="sm" variant="outline" className="w-fit">
+                <ListPlus />
+                Add to prep checklist
+              </Button>
             </div>
           )}
         </CardContent>

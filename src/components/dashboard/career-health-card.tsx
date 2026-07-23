@@ -10,19 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScoreRing } from "@/components/dashboard/score-ring";
 import { useAsyncAction } from "@/hooks/use-async-action";
-import type { CareerHealthResultV2 } from "@/features/career/types";
+import type { CareerHealthSummary } from "@/features/career-agent/types";
 
-const FACTOR_LABEL: Record<keyof Omit<CareerHealthResultV2, "overallScore">, string> = {
-  interviewReadiness: "Interview readiness",
-  resumeQuality: "Resume quality",
-  linkedinQuality: "LinkedIn quality",
-  skillReadiness: "Skill readiness",
-  marketReadiness: "Market readiness",
-  companyReadiness: "Company readiness",
-  growthReadiness: "Growth readiness",
-};
-
-export function CareerHealthCard({ health }: { health: CareerHealthResultV2 | null }) {
+/**
+ * Career Health Summary — Sprint 3 rule 4: leads with a human-readable
+ * assessment (`summary.headline` + strengths/blockers), not a bare
+ * percentage. `overallScore` is still shown, but as a small secondary
+ * `ScoreRing` beside the narrative rather than the first thing the user
+ * sees. The "save snapshot" action (`generateCareerHealthAction`,
+ * `computeCareerHealthV2` persisted) is unchanged — this is the only
+ * place that real, already-shipped feature is reachable from.
+ */
+export function CareerHealthCard({ summary }: { summary: CareerHealthSummary }) {
   const [saved, setSaved] = useState(false);
   const saveAction = useAsyncAction(generateCareerHealthAction);
 
@@ -36,55 +35,62 @@ export function CareerHealthCard({ health }: { health: CareerHealthResultV2 | nu
     }
   }
 
-  const availableFactors = health
-    ? (Object.entries(health).filter(
-        ([key, value]) => key !== "overallScore" && (value as { score: number | null }).score !== null,
-      ) as [keyof Omit<CareerHealthResultV2, "overallScore">, { score: number; explanation: string }][])
-    : [];
-
   return (
     <Card className="h-full transition-shadow hover:shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <HeartPulse className="text-muted-foreground size-4" />
-          Career Health Score
+          Career Health
         </CardTitle>
       </CardHeader>
       <CardContent className="flex h-full flex-col gap-4">
-        {!health ? (
-          <>
-            <p className="text-muted-foreground flex-1 text-sm">
-              Upload a resume or start applying to unlock your Career Health score — every factor
-              is computed from your own real activity, never a guess.
+        <div className="flex items-start gap-4">
+          {summary.overallScore !== null && (
+            <ScoreRing score={summary.overallScore} label="Career Health Score" size="sm" />
+          )}
+          <p className="flex-1 text-sm font-medium">{summary.headline}</p>
+        </div>
+
+        {summary.strengths.length > 0 && (
+          <div>
+            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Strengths
             </p>
+            <ul className="mt-1 flex flex-col gap-1 text-sm">
+              {summary.strengths.map((strength) => (
+                <li key={strength}>{strength}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {summary.blockers.length > 0 && (
+          <div>
+            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Blockers
+            </p>
+            <ul className="mt-1 flex flex-col gap-1 text-sm">
+              {summary.blockers.map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="mt-auto flex items-center gap-3">
+          {summary.overallScore === null ? (
             <Button asChild size="sm" variant="outline">
               <Link href="/resume">Upload a resume</Link>
             </Button>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-4">
-              <ScoreRing score={health.overallScore} label="Career Health Score" />
-              <p className="text-muted-foreground text-sm">
-                Average of {availableFactors.length} of 7 factors that have real data behind them.
-              </p>
-            </div>
-            {availableFactors.length > 0 && (
-              <ul className="flex flex-col gap-1 text-sm">
-                {availableFactors.map(([key, factor]) => (
-                  <li key={key} className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">{FACTOR_LABEL[key]}</span>
-                    <span className="font-medium">{factor.score}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Button onClick={handleSave} disabled={saveAction.isPending} size="sm" variant="outline" className="w-fit">
-              {saveAction.isPending ? "Saving…" : saved ? "Snapshot saved" : "Save snapshot"}
-            </Button>
-            {saveAction.error && <p className="text-destructive text-sm">{saveAction.error}</p>}
-          </>
-        )}
+          ) : (
+            <>
+              <Button onClick={handleSave} disabled={saveAction.isPending} size="sm" variant="outline">
+                {saveAction.isPending ? "Saving…" : saved ? "Snapshot saved" : "Save snapshot"}
+              </Button>
+              {saveAction.error && <p className="text-destructive text-sm">{saveAction.error}</p>}
+            </>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

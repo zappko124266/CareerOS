@@ -1,4 +1,5 @@
 import type { Company } from "@/generated/prisma/client";
+import type { EnrichedRecruiter } from "@/features/recruiters/orchestrator";
 
 export interface CompanyAggregates {
   totalOpportunities: number;
@@ -24,4 +25,11 @@ export interface CompanyAggregates {
 export interface CompanyIntelligence {
   company: Company;
   aggregates: CompanyAggregates;
+  /** Sprint 21 (Recruiter Intelligence & Networking Operating System),
+   * Module 14 — *this user's own* recruiters at this company (`Recruiter`
+   * is per-user, unlike `Company`/`aggregates` above which are shared
+   * across every user — see `Recruiter`'s own doc comment). Empty when
+   * the caller doesn't pass a `userId` (kept optional so this stays a
+   * pure additive change to `getCompanyIntelligence`'s signature). */
+  recruiters: EnrichedRecruiter[];
 }

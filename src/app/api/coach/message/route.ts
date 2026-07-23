@@ -1,13 +1,6 @@
 import { z } from "zod";
 
-import { analyzeMessage } from "@/features/coach/analyze-message";
-import { getCoachContext } from "@/features/coach/context";
-import {
-  buildCoachResponseMeta,
-  fallbackCoachMessage,
-  streamCoachMessage,
-} from "@/features/coach/generate-response";
-import { getCareerRoadmap } from "@/features/coach/roadmap";
+import { routeCoachMessage } from "@/features/ai/router";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { logger } from "@/lib/logger";
 
@@ -34,14 +27,14 @@ function plainTextStreamResponse(text: string, headers: HeadersInit): Response {
 
 /**
  * The Coach chat's only server entry point. The client never imports
- * `analyzeMessage`/`getCoachContext`/`streamCoachMessage` directly (those
- * pull in server-only Prisma/Supabase code) — it POSTs here instead.
+ * anything from `features/ai`/`features/coach` directly (those pull in
+ * server-only Prisma/Supabase code) — it POSTs here instead.
  *
- * Flow: Context Engine -> Orchestrator (AI-backed classifier with
- * deterministic fallback, roadmap-gated decision) -> Conversation
- * Generator (streams the Orchestrator's already-decided recommendation in
- * natural language). The Orchestrator's `cta`/`existingRoute` are never
- * touched by the model — see `generate-response.ts`.
+ * Sprint 8: this route now calls exactly one function —
+ * `routeCoachMessage` (`features/ai/router.ts`, the AI Router) — instead
+ * of orchestrating the Context Engine/Decision Engine/Response Builder
+ * itself. Request schema and response shape (a text stream plus an
+ * `X-Coach-Meta` header) are unchanged.
  */
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -57,23 +50,19 @@ export async function POST(request: Request) {
 
   const { message, history } = parsed.data;
 
-  const context = await getCoachContext(user);
-  const roadmap = getCareerRoadmap(context);
-  const orchestration = await analyzeMessage(message, context);
-  const meta = buildCoachResponseMeta(orchestration, context);
+  const { meta, stream, fallback } = await routeCoachMessage({ user, message, history });
   const headers = { "X-Coach-Meta": encodeURIComponent(JSON.stringify(meta)) };
 
   try {
-    const stream = streamCoachMessage({ message, context, roadmap, orchestration, history });
-    return stream.toTextStreamResponse({ headers });
+    return stream().toTextStreamResponse({ headers });
   } catch (error) {
     // Setup failure (e.g. AI_PROVIDER not configured) — never break chat;
-    // fall back to the Orchestrator's own plain-language decision, still
-    // delivered as a (single-chunk) stream so the client's reader works
-    // identically either way.
+    // fall back to the Decision Engine's own plain-language decision,
+    // still delivered as a (single-chunk) stream so the client's reader
+    // works identically either way.
     logger.error("coach.stream_setup_failed", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return plainTextStreamResponse(fallbackCoachMessage(orchestration), headers);
+    return plainTextStreamResponse(fallback(), headers);
   }
 }

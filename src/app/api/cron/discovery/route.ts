@@ -2,29 +2,23 @@ import { NextResponse } from "next/server";
 
 import { env } from "@/lib/env.server";
 import { logger } from "@/lib/logger";
-import { logAuditEvent } from "@/lib/audit";
-import { checkEntitlement, consumeEntitlement } from "@/features/entitlements/service";
-import { listUsersDueForDiscovery } from "@/features/discovery/queries";
+import { runAutomation } from "@/features/automation/engine";
 import { hideStaleCompanies, hideStaleListings } from "@/features/discovery/maintenance";
-import { runDiscovery } from "@/features/discovery/run-discovery";
-
-// Processed sequentially, capped per invocation — each `runDiscovery` call
-// makes several AI Router calls (search strategy + job/company ranking)
-// and can legitimately take minutes (see docs/ARCHITECTURE.md#job-discovery-engine
-// for this session's observed AI Router latency). With no background job
-// queue in this codebase (confirmed absent by this sprint's own audit —
-// see the same section), a single Vercel Function invocation processing
-// everyone at once would risk the platform's execution time limit for any
-// non-trivial user count. A real queue (reusing this same `runDiscovery`
-// function as the worker) is the natural next step once that becomes the
-// bottleneck — flagged here rather than silently capped with no
-// explanation.
-const MAX_USERS_PER_INVOCATION = 5;
 
 /**
  * Vercel Cron hits this on a schedule (see `vercel.json`) — Background
  * Discovery's actual "background" mechanism. Also callable manually with
  * the same `CRON_SECRET` bearer token for local testing/verification.
+ *
+ * Sprint 5 (Automation Engine): the due-user loop this route used to run
+ * itself (batch fetch, entitlement check, `runDiscovery`, audit logging,
+ * per-user try/catch) now lives in `features/automation/` as the
+ * `job_discovery_run` task — this route only does the auth check and the
+ * stale-listing/company maintenance pass (unrelated to task execution),
+ * then hands the actual work to `runAutomation`. The manual "Discover
+ * now" trigger (`actions/discovery.ts`) is untouched and keeps its own
+ * `discovery.run_*` audit events; this scheduled path's execution
+ * history is now the unified `automation.task_*` events instead.
  */
 export async function GET(request: Request) {
   if (!env.CRON_SECRET) {
@@ -47,48 +41,13 @@ export async function GET(request: Request) {
     hideStaleCompanies(now),
   ]);
 
-  const dueUserIds = await listUsersDueForDiscovery(now);
-  const batch = dueUserIds.slice(0, MAX_USERS_PER_INVOCATION);
-
-  const results: { userId: string; status: "completed" | "skipped" | "failed"; detail?: string }[] = [];
-
-  for (const userId of batch) {
-    const entitlement = await checkEntitlement(userId, "JOB_DISCOVERY_RUN");
-    if (!entitlement.allowed) {
-      results.push({ userId, status: "skipped", detail: "entitlement limit reached" });
-      continue;
-    }
-
-    try {
-      await logAuditEvent("discovery.run_started", {
-        userId,
-        metadata: { trigger: "SCHEDULED" },
-      });
-      const summary = await runDiscovery(userId, "SCHEDULED");
-      await consumeEntitlement(userId, "JOB_DISCOVERY_RUN");
-      await logAuditEvent("discovery.run_completed", {
-        userId,
-        metadata: {
-          runId: summary.runId,
-          jobsFound: summary.jobsFound,
-          newJobsFound: summary.newJobsFound,
-        },
-      });
-      results.push({ userId, status: "completed" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error("discovery.scheduled_run_failed", { userId, message });
-      await logAuditEvent("discovery.run_failed", { userId, metadata: { message } });
-      results.push({ userId, status: "failed", detail: message });
-    }
-  }
+  const summary = await runAutomation("job_discovery_run", now);
 
   return NextResponse.json({
     staleListingsHidden,
     staleCompaniesHidden,
-    dueCount: dueUserIds.length,
-    processedCount: batch.length,
-    remainingCount: Math.max(0, dueUserIds.length - batch.length),
-    results,
+    dueCount: summary.dueCount,
+    processedCount: summary.processedCount,
+    results: summary.results,
   });
 }

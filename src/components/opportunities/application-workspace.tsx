@@ -40,6 +40,8 @@ import type {
   Opportunity,
   InterviewNote,
   Recruiter,
+  Resume,
+  ResumeVersion,
 } from "@/generated/prisma/client";
 import type { ApplicationReviewOutput } from "@/features/career-intelligence/applications/review/types";
 import type {
@@ -54,19 +56,22 @@ import { ApplicationAutomationPanel } from "./application-automation-panel";
 import { ApplicationPackagePanel } from "./application-package-panel";
 import { ApplicationStudio } from "./application-studio/application-studio";
 import { CareerGapPanel } from "./career-gap-panel";
+import { JobCopilotPanel } from "./job-copilot-panel";
 import { MatchPanel } from "./match-panel";
 import { OpportunityIntelligenceSummary } from "./opportunity-intelligence-summary";
 import { OpportunityScoreCard } from "./opportunity-score-card";
+import { ResumeRecommendationPanel } from "./resume-recommendation-panel";
 import { ChecklistEditor } from "./checklist-editor";
 import { CustomQuestionsEditor } from "./custom-questions-editor";
 import { DocumentsPanel } from "./documents-panel";
 import { InterviewWorkspacePanel } from "./interview-workspace-panel";
-import type { InterviewWithRelations } from "./interview-workspace-panel";
+import type { InterviewOperatingSystemBundle, InterviewWithRelations } from "./interview-workspace-panel";
 import { TimelinePanel } from "./timeline-panel";
 
 type ReviewRow = ApplicationReviewOutput & { id: string; createdAt: Date };
 
 type OpportunityWithNotes = Opportunity & { interviewNotes: InterviewNote[] };
+type ResumeVersionWithResume = ResumeVersion & { resume: Pick<Resume, "id" | "title"> };
 
 function formatSalary(opportunity: Opportunity) {
   if (!opportunity.salaryMin && !opportunity.salaryMax) return null;
@@ -97,6 +102,11 @@ export function ApplicationWorkspace({
   offer,
   companyId,
   latestGapAssessment,
+  interviewOS,
+  resumeVersions,
+  latestResumeId,
+  name,
+  targetRole,
 }: {
   opportunity: OpportunityWithNotes;
   intelligence: OpportunityIntelligence;
@@ -117,6 +127,14 @@ export function ApplicationWorkspace({
   offer: Offer | null;
   companyId: string | null;
   latestGapAssessment: ExperienceGapAssessmentOutput | null;
+  /** Sprint 20 (Interview Intelligence & Interview Operating System) */
+  interviewOS: InterviewOperatingSystemBundle | null;
+  /** Sprint 12 (Job Studio), requirement 4 */
+  resumeVersions: ResumeVersionWithResume[];
+  latestResumeId: string | null;
+  /** Sprint 12 (Job Studio), requirement 5 — Job Copilot */
+  name: string;
+  targetRole: string | null;
 }) {
   const [opportunity, setOpportunity] = useState(initialOpportunity);
   const statusAction = useAsyncAction(updateOpportunityStatusAction);
@@ -265,6 +283,7 @@ export function ApplicationWorkspace({
           <TabsTrigger value="automation">Automation</TabsTrigger>
           <TabsTrigger value="interview">Interview</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="copilot">Copilot</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="flex flex-col gap-4">
@@ -301,6 +320,12 @@ export function ApplicationWorkspace({
           <OpportunityScoreCard
             factors={opportunityScore.factors}
             overallScore={opportunityScore.overallScore}
+          />
+          <ResumeRecommendationPanel
+            companyName={opportunity.companyName}
+            versions={resumeVersions}
+            latestResumeId={latestResumeId}
+            opportunityId={opportunity.id}
           />
           <CareerGapPanel opportunityId={opportunity.id} latestAssessment={latestGapAssessment} />
         </TabsContent>
@@ -365,6 +390,8 @@ export function ApplicationWorkspace({
             latestStrategy={latestStrategy}
             latestFollowUp={latestFollowUp}
             submissions={submissions}
+            checklist={(opportunity.checklist as unknown as Checklist) ?? []}
+            onChecklistChange={handleChecklistChange}
           />
         </TabsContent>
 
@@ -374,11 +401,22 @@ export function ApplicationWorkspace({
             interviews={interviews}
             recruiters={recruiters}
             offer={offer}
+            interviewOS={interviewOS}
           />
         </TabsContent>
 
         <TabsContent value="timeline">
           <TimelinePanel history={statusHistory} notes={opportunity.interviewNotes} />
+        </TabsContent>
+
+        <TabsContent value="copilot">
+          <JobCopilotPanel
+            name={name}
+            targetRole={targetRole}
+            title={opportunity.title}
+            companyName={opportunity.companyName}
+            description={opportunity.description}
+          />
         </TabsContent>
       </Tabs>
     </div>

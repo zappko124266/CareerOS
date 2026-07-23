@@ -48,7 +48,21 @@ function nextMessageId() {
   return `msg-${messageIdCounter}`;
 }
 
-export function CoachChat({ name, targetRole }: { name: string; targetRole: string | null }) {
+export function CoachChat({
+  name,
+  targetRole,
+  openingContext,
+}: {
+  name: string;
+  targetRole: string | null;
+  /** Sprint 12 (Job Studio) — when set, silently prepended to the
+   * `history` sent on every request as a synthetic (never rendered) user
+   * turn, so the AI Router's existing Context/Decision Engine grounds
+   * its answers in this specific job without the user having to
+   * re-explain which one they mean. No new AI plumbing: `history` is
+   * already sent on every request exactly like this. */
+  openingContext?: string;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -73,6 +87,13 @@ export function CoachChat({ name, targetRole }: { name: string; targetRole: stri
     const history = messagesRef.current
       .slice(-MAX_HISTORY_TURNS)
       .map((message) => ({ role: message.role, text: message.text }));
+
+    // Job Studio's Job Copilot passes `openingContext` to ground every
+    // request in one specific opportunity — prepended here rather than
+    // added to `messages` state so it never renders as a chat bubble.
+    if (openingContext) {
+      history.unshift({ role: "user", text: openingContext });
+    }
 
     const userMessage: ChatMessage = {
       id: nextMessageId(),

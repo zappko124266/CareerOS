@@ -41,6 +41,11 @@ const RESPONSE_STATUSES = new Set<string>([
 
 const INTERVIEW_STATUSES = new Set<string>(["INTERVIEWING", "OFFER", "ACCEPTED", "DECLINED", "JOINED"]);
 const OFFER_STATUSES = new Set<string>(["OFFER", "ACCEPTED", "DECLINED", "JOINED"]);
+/** Sprint 4 (Career Brain — Application Intelligence "rejection trends").
+ * `DECLINED` means the employer declined the candidate (distinct from the
+ * user withdrawing) — same self-reported-status honesty caveat as every
+ * other set here. */
+const REJECTED_STATUSES = new Set<string>(["REJECTED", "DECLINED"]);
 
 /** Checks the opportunity's *current* status and its full `statusHistory`
  * — an opportunity that reached INTERVIEWING and was later REJECTED still
@@ -93,6 +98,8 @@ export interface ApplicationAnalytics {
   responseRate: number;
   interviewRate: number;
   offerRate: number;
+  totalRejections: number;
+  rejectionRate: number;
   resumePerformance: GroupedRate[];
   coverLetterResponseRateWith: number | null;
   coverLetterResponseRateWithout: number | null;
@@ -120,6 +127,7 @@ export async function computeApplicationAnalytics(userId: string): Promise<Appli
   const totalInterviews = applied.filter((o) => everReached(o, INTERVIEW_STATUSES)).length;
   const totalOffers = applied.filter((o) => everReached(o, OFFER_STATUSES)).length;
   const totalResponses = applied.filter((o) => everReached(o, RESPONSE_STATUSES)).length;
+  const totalRejections = applied.filter((o) => everReached(o, REJECTED_STATUSES)).length;
 
   const resumeIds = Array.from(
     new Set(applied.map((o) => o.resumeId).filter((id): id is string => Boolean(id))),
@@ -155,6 +163,8 @@ export async function computeApplicationAnalytics(userId: string): Promise<Appli
     responseRate: computeRate(totalApplications, totalResponses),
     interviewRate: computeRate(totalApplications, totalInterviews),
     offerRate: computeRate(totalApplications, totalOffers),
+    totalRejections,
+    rejectionRate: computeRate(totalApplications, totalRejections),
     resumePerformance,
     coverLetterResponseRateWith:
       withCoverLetter.length > 0 ? computeRate(withCoverLetter.length, responsesWith) : null,

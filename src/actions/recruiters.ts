@@ -13,14 +13,18 @@ import {
   logRecruiterInteraction,
   updateRecruiter,
 } from "@/features/recruiters/service";
+import { createReferral, deleteReferral, updateReferralStatus } from "@/features/recruiters/referrals";
 import {
+  CreateReferralInputSchema,
   CreateRecruiterInputSchema,
+  DeleteReferralInputSchema,
   DeleteRecruiterInputSchema,
   DeleteRecruiterInteractionInputSchema,
   LogRecruiterInteractionInputSchema,
+  UpdateReferralStatusInputSchema,
   UpdateRecruiterInputSchema,
 } from "@/features/recruiters/schema";
-import type { Recruiter, RecruiterInteraction } from "@/generated/prisma/client";
+import type { Recruiter, RecruiterInteraction, Referral } from "@/generated/prisma/client";
 import type { DataActionResult } from "@/types/action";
 
 function toActionError(error: unknown, fallbackMessage: string): DataActionResult<never> {
@@ -148,5 +152,74 @@ export async function deleteRecruiterInteractionAction(
     return { status: "success", data: { deleted: true } };
   } catch (error) {
     return toActionError(error, "We couldn't remove that interaction.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Referrals (Sprint 21, Module 5)
+// ---------------------------------------------------------------------------
+
+export async function createReferralAction(input: unknown): Promise<DataActionResult<Referral>> {
+  const user = await verifySession();
+
+  const parsed = CreateReferralInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "That referral wasn't valid." };
+  }
+
+  try {
+    const referral = await createReferral(user.id, parsed.data);
+    await logAuditEvent("referral.created", {
+      userId: user.id,
+      metadata: { referralId: referral.id, recruiterId: parsed.data.recruiterId },
+    });
+    revalidatePath("/recruiters");
+    if (parsed.data.recruiterId) revalidatePath(`/recruiters/${parsed.data.recruiterId}`);
+    return { status: "success", data: referral };
+  } catch (error) {
+    return toActionError(error, "We couldn't create that referral.");
+  }
+}
+
+export async function updateReferralStatusAction(input: unknown): Promise<DataActionResult<Referral>> {
+  const user = await verifySession();
+
+  const parsed = UpdateReferralStatusInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "That status wasn't valid." };
+  }
+
+  try {
+    const referral = await updateReferralStatus(user.id, parsed.data);
+    await logAuditEvent("referral.status_changed", {
+      userId: user.id,
+      metadata: { referralId: referral.id, status: parsed.data.status },
+    });
+    revalidatePath("/recruiters");
+    if (referral.recruiterId) revalidatePath(`/recruiters/${referral.recruiterId}`);
+    return { status: "success", data: referral };
+  } catch (error) {
+    return toActionError(error, "We couldn't update that referral.");
+  }
+}
+
+export async function deleteReferralAction(input: unknown): Promise<DataActionResult<{ deleted: true }>> {
+  const user = await verifySession();
+
+  const parsed = DeleteReferralInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", message: "That request wasn't valid." };
+  }
+
+  try {
+    await deleteReferral(user.id, parsed.data.referralId);
+    await logAuditEvent("referral.deleted", {
+      userId: user.id,
+      metadata: { referralId: parsed.data.referralId },
+    });
+    revalidatePath("/recruiters");
+    return { status: "success", data: { deleted: true } };
+  } catch (error) {
+    return toActionError(error, "We couldn't remove that referral.");
   }
 }

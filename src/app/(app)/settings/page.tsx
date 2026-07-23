@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CreditCard, LogOut, Sparkles } from "lucide-react";
+import { CreditCard, LogOut, Sparkles, UserRound } from "lucide-react";
 
 import { signOutAction } from "@/actions/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -58,6 +58,24 @@ export default async function SettingsPage() {
               </p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Career Identity</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <p className="text-muted-foreground text-sm">
+            Your unified profile — career details, completion guidance, document vault, timeline,
+            and an AI assistant that already knows all of it.
+          </p>
+          <Button asChild variant="outline" className="w-fit">
+            <Link href="/settings/identity">
+              <UserRound />
+              Open Career Identity
+            </Link>
+          </Button>
         </CardContent>
       </Card>
 

@@ -70,6 +70,37 @@ const serverEnvSchema = z.object({
   // sends this as `Authorization: Bearer <value>` on scheduled invocations.
   // See https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs.
   CRON_SECRET: optionalString,
+
+  // Google Connector — see src/features/connectors/connectors/google.
+  // Google Cloud Console > APIs & Services > Credentials > OAuth client ID
+  // (Web application), redirect URI `<NEXT_PUBLIC_APP_URL>/api/connectors/google/callback`.
+  // `googleConnector.isConfigured()` reports unconfigured (not an error)
+  // when either is unset, same convention as every opportunity provider.
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
+
+  // Microsoft Connector (Sprint 14) — see
+  // src/features/connectors/connectors/microsoft. Microsoft Entra ID
+  // (Azure AD) app registration > Certificates & secrets. Redirect URI
+  // `<NEXT_PUBLIC_APP_URL>/api/connectors/microsoft/callback`.
+  // `microsoftConnector.isConfigured()` reports unconfigured (not an
+  // error) when any of the three is unset, same convention as Google.
+  MICROSOFT_CLIENT_ID: optionalString,
+  MICROSOFT_CLIENT_SECRET: optionalString,
+  // The Azure AD tenant to authorize against — a GUID, or "common" (both
+  // personal and work/school Microsoft accounts), "organizations"
+  // (work/school only), or "consumers" (personal only). Required
+  // alongside the two above; there's no safe default to fall back to.
+  MICROSOFT_TENANT_ID: optionalString,
+
+  // Encrypts/decrypts connector OAuth tokens at rest
+  // (src/features/connectors/crypto.ts) — a random 32-byte key,
+  // base64-encoded (e.g. `openssl rand -base64 32`). Required before any
+  // connector's `login()`/`refresh()` can persist a real token (Google
+  // and Microsoft both depend on this one key — not a per-connector key);
+  // optional at this schema level so `next build` never fails on its own,
+  // same as `AI_PROVIDER`'s keys.
+  CONNECTOR_TOKEN_ENCRYPTION_KEY: optionalString,
 });
 
 const parsed = serverEnvSchema.safeParse(process.env);

@@ -8,6 +8,14 @@
     {
       "path": "/api/cron/follow-up",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/gmail-sync",
+      "schedule": "15 */3 * * *"
+    },
+    {
+      "path": "/api/cron/calendar-sync",
+      "schedule": "30 */3 * * *"
     }
   ]
 }

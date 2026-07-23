@@ -2,11 +2,13 @@ import type { z } from "zod";
 
 import type {
   AddInterviewNoteInputSchema,
+  AnalyzeInterviewFeedbackInputSchema,
   CompareOffersInputSchema,
   CreateInterviewInputSchema,
   DeleteOfferInputSchema,
   GenerateAnswerFeedbackInputSchema,
   GenerateInterviewPrepInputSchema,
+  InterviewDocumentTypeSchema,
   InterviewStageSchema,
   UpdateInterviewInputSchema,
   UpdateInterviewStageInputSchema,
@@ -14,6 +16,7 @@ import type {
 } from "./schema";
 
 export type InterviewStage = z.infer<typeof InterviewStageSchema>;
+export type InterviewDocumentType = z.infer<typeof InterviewDocumentTypeSchema>;
 export type CreateInterviewInput = z.infer<typeof CreateInterviewInputSchema>;
 export type UpdateInterviewStageInput = z.infer<typeof UpdateInterviewStageInputSchema>;
 export type UpdateInterviewInput = z.infer<typeof UpdateInterviewInputSchema>;
@@ -23,6 +26,17 @@ export type UpsertOfferInput = z.infer<typeof UpsertOfferInputSchema>;
 export type DeleteOfferInput = z.infer<typeof DeleteOfferInputSchema>;
 export type CompareOffersInput = z.infer<typeof CompareOffersInputSchema>;
 export type AddInterviewNoteInput = z.infer<typeof AddInterviewNoteInputSchema>;
+export type AnalyzeInterviewFeedbackInput = z.infer<typeof AnalyzeInterviewFeedbackInputSchema>;
+
+/** Sprint 20 — the exact shape `analyzeInterviewFeedback`
+ * (`career-intelligence/interview/feedback-analysis/`) returns, persisted
+ * as-is onto `Interview.feedbackAnalysis`. */
+export interface InterviewFeedbackAnalysis {
+  strengths: string[];
+  weaknesses: string[];
+  followUpAdvice: string[];
+  nextStageProbability: number;
+}
 
 export const INTERVIEW_STAGE_ORDER: InterviewStage[] = [
   "APPLIED",

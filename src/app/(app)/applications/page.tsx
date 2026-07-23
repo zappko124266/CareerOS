@@ -73,6 +73,12 @@ export default async function ApplicationsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="ghost" size="sm" className="w-fit">
+            <Link href="/opportunities/companies">Company tracker</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="w-fit">
+            <Link href="/opportunities/compare">Compare jobs</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="w-fit">
             <Link href="/opportunities/analytics">View analytics</Link>
           </Button>
           <Button asChild variant="default" size="sm" className="w-fit">
